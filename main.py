@@ -7,10 +7,10 @@ app = FastAPI()
 
 
 @app.get("/api/inside/")
-def num_pic(layers: List):
-    return {"layers": layers}
+def get_inside_layers():
+    return {"layers": ["layer1", "layer2", "layer3"]}
 
 @app.post("/api/inside/")
-def num_pic(num_image: UploadFile):
+def upload_inside_image(num_image: UploadFile):
     return {"filename": num_image.filename}
     
