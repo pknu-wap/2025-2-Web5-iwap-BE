@@ -33,6 +33,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model.to(device)
 
+
 # Conv 레이어 출력 저장용
 feature_maps = {}
 fc = {}
