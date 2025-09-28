@@ -1,11 +1,14 @@
 from PIL import Image
 import io
-from services.inside_return_featuremap import process_image, feature_maps, fc, convert_list, get_normalized_outputs
+from services.inside_return_featuremap import process_image, feature_maps, fc, get_normalized_outputs
 
 from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from typing import List
 
 app = FastAPI()
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 행렬 구조 반환 API
 # 각 레이어에 대한 행렬 값 제공
