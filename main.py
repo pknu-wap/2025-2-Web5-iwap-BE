@@ -4,11 +4,14 @@ from services.inside_return_featuremap import process_image, feature_maps, fc, g
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette_prometheus import metrics, PrometheusMiddleware
 from typing import List
 
 app = FastAPI()
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(PrometheusMiddleware)
+app.add_route("/metrics", metrics)
 
 # 행렬 구조 반환 API
 # 각 레이어에 대한 행렬 값 제공
