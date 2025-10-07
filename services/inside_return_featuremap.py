@@ -9,13 +9,6 @@ from typing import Optional, Dict, Any
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "public", "resnet18_mnist.pth")
 
-transform = transforms.Compose([
-    transforms.Resize(224),                # ResNet18 입력 크기 224x224
-    transforms.Grayscale(num_output_channels=3),  # 1채널 → 3채널
-    transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,)) 
-])
-
 class FeatureMapProcessor:
     def __init__(self):
         self.feature_maps: Dict[str, torch.Tensor] = {}
@@ -59,8 +52,15 @@ class FeatureMapProcessor:
         model.fc.register_forward_hook(save_fc("fc"))
 
     def process_image(self, pil_image, model: torch.nn.Module):
-            tensor = transform(pil_image).unsqueeze(0)
-            _ = model(tensor)   # forward 실행 → hook으로 feature 저장
+        transform = transforms.Compose([
+            transforms.Resize(224),                # ResNet18 입력 크기 224x224
+            transforms.Grayscale(num_output_channels=3),  # 1채널 → 3채널
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,)) 
+        ])
+
+        tensor = transform(pil_image).unsqueeze(0)
+        _ = model(tensor)   # forward 실행 → hook으로 feature 저장
 
     def normalization(self, arr: torch.Tensor):
         arr = arr.cpu().numpy()

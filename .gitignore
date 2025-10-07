@@ -208,3 +208,5 @@ __marimo__/
 
 data/*
 echo "feature_maps/" >> .gitignore
+
+*.json
