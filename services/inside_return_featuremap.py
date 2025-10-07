@@ -53,9 +53,10 @@ class FeatureMapProcessor:
 
     def process_image(self, pil_image, model: torch.nn.Module):
         transform = transforms.Compose([
-            transforms.Resize((28, 28)),                # ResNet18 입력 크기 224x224
+            transforms.Resize(224),                # ResNet18 입력 크기 224x224
             transforms.Grayscale(num_output_channels=3),  # 1채널 → 3채널
             transforms.ToTensor(),
+            transforms.Lambda(lambda x: 1-x), #흑백 반전
             transforms.Normalize((0.5,), (0.5,)) 
         ])
 
