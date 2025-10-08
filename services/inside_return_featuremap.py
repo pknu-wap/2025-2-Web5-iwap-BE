@@ -52,12 +52,16 @@ class FeatureMapProcessor:
         model.fc.register_forward_hook(save_fc("fc"))
 
     def process_image(self, pil_image, model: torch.nn.Module):
+        # 흑백 반전 테스트를 위한 코드 추가
         import numpy as np
+        
         # PIL 이미지를 numpy 배열로 변환
         img_array = np.array(pil_image)
+        print(f"원본 이미지 - shape: {img_array.shape}, min: {img_array.min()}, max: {img_array.max()}")
         
-        # 흑백 반전: 255 - 픽셀값
+        # 흑백 반전
         inverted_array = 255 - img_array
+        print(f"반전 후 이미지 - shape: {inverted_array.shape}, min: {inverted_array.min()}, max: {inverted_array.max()}")
         
         # numpy 배열을 다시 PIL 이미지로 변환
         from PIL import Image
