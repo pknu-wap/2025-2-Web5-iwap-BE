@@ -1,9 +1,13 @@
 from PIL import Image
 import io
 from services.inside_return_featuremap import get_normalized_outputs
+import logging
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
+
+# 로깅 설정
+logging.basicConfig(filename='/home/ubuntu/image_processing.log', level=logging.INFO)
 
 app = FastAPI()
 app.add_middleware(GZipMiddleware, minimum_size=1000)

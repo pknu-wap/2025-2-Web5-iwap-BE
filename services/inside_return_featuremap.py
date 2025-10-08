@@ -59,7 +59,6 @@ class FeatureMapProcessor:
         img_array = np.array(pil_image)
         # 로그 파일에 출력
         import logging
-        logging.basicConfig(filename='image_processing.log', level=logging.INFO)
         logging.info(f"원본 이미지 - shape: {img_array.shape}, min: {img_array.min()}, max: {img_array.max()}")
         
         # 흑백 반전
