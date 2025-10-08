@@ -52,21 +52,19 @@ class FeatureMapProcessor:
         model.fc.register_forward_hook(save_fc("fc"))
 
     def process_image(self, pil_image, model: torch.nn.Module):
-        # 흑백 반전 테스트를 위한 코드 추가
+        # 흑백 반전: RGB만 반전(알파는 유지), 디버깅 평균값 출력
         import numpy as np
-        
-        # PIL 이미지를 numpy 배열로 변환
-        img_array = np.array(pil_image)
-        # 로그 파일에 출력
-        import logging
-        logging.info(f"원본 이미지 - shape: {img_array.shape}, min: {img_array.min()}, max: {img_array.max()}")
-        
-        # 흑백 반전
-        inverted_array = 255 - img_array
-        logging.info(f"반전 후 이미지 - shape: {inverted_array.shape}, min: {inverted_array.min()}, max: {inverted_array.max()}")
-        
-        # numpy 배열을 다시 PIL 이미지로 변환
         from PIL import Image
+
+        img_array = np.array(pil_image)
+        if img_array.ndim == 3 and img_array.shape[2] == 4:
+            # RGBA: RGB만 반전, A는 그대로 유지
+            inverted_array = img_array.copy()
+            inverted_array[..., :3] = 255 - inverted_array[..., :3]
+        else:
+            # RGB 또는 그레이: 전체 채널 반전
+            inverted_array = 255 - img_array
+
         pil_image = Image.fromarray(inverted_array.astype(np.uint8))
         
         transform = transforms.Compose([
