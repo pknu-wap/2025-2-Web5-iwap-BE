@@ -52,9 +52,16 @@ class FeatureMapProcessor:
         model.fc.register_forward_hook(save_fc("fc"))
 
     def process_image(self, pil_image, model: torch.nn.Module):
-        # 흑백 반전을 ToTensor() 전에 적용
-        from PIL import ImageOps
-        pil_image = ImageOps.invert(pil_image)
+        import numpy as np
+        # PIL 이미지를 numpy 배열로 변환
+        img_array = np.array(pil_image)
+        
+        # 흑백 반전: 255 - 픽셀값
+        inverted_array = 255 - img_array
+        
+        # numpy 배열을 다시 PIL 이미지로 변환
+        from PIL import Image
+        pil_image = Image.fromarray(inverted_array.astype(np.uint8))
         
         transform = transforms.Compose([
             transforms.Resize(224),                # ResNet18 입력 크기 224x224
