@@ -68,10 +68,10 @@ class FeatureMapProcessor:
         pil_image = Image.fromarray(inverted_array.astype(np.uint8))
         
         transform = transforms.Compose([
-            transforms.Resize(224),                # ResNet18 입력 크기 224x224
+            transforms.Resize(224, 224),                # ResNet18 입력 크기 224x224
             transforms.Grayscale(num_output_channels=3),  # 1채널 → 3채널
             transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,)) 
+            transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5)) 
         ])
 
         tensor = transform(pil_image).unsqueeze(0)
