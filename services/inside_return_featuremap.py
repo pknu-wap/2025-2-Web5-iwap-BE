@@ -57,11 +57,14 @@ class FeatureMapProcessor:
         
         # PIL 이미지를 numpy 배열로 변환
         img_array = np.array(pil_image)
-        print(f"원본 이미지 - shape: {img_array.shape}, min: {img_array.min()}, max: {img_array.max()}")
+        # 로그 파일에 출력
+        import logging
+        logging.basicConfig(filename='image_processing.log', level=logging.INFO)
+        logging.info(f"원본 이미지 - shape: {img_array.shape}, min: {img_array.min()}, max: {img_array.max()}")
         
         # 흑백 반전
         inverted_array = 255 - img_array
-        print(f"반전 후 이미지 - shape: {inverted_array.shape}, min: {inverted_array.min()}, max: {inverted_array.max()}")
+        logging.info(f"반전 후 이미지 - shape: {inverted_array.shape}, min: {inverted_array.min()}, max: {inverted_array.max()}")
         
         # numpy 배열을 다시 PIL 이미지로 변환
         from PIL import Image
