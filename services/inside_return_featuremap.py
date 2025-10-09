@@ -1,10 +1,10 @@
 import torch
-import torch.nn as nn # 자동 손실, 정확도 계산해주는 라이브러리
-import torch.optim as optim # 최적화 알고리즘 라이브러리
+import torch.nn as nn  # 자동 손실, 정확도 계산해주는 라이브러리
 from torchvision import transforms, models
 import numpy as np
 import os
 from typing import Optional, Dict, Any
+from PIL import ImageOps
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "public", "resnet18_mnist.pth")
@@ -18,20 +18,20 @@ class FeatureMapProcessor:
 
     def load_model(self):        #모델 로드 후 캐싱
         if self._model is None:
-                model = models.resnet18(weights=None)  # 학습용 ResNet18
-                model.fc = nn.Linear(model.fc.in_features, 10)  # MNIST 클래스 수: 10
+            model = models.resnet18(weights=None)  # 학습용 ResNet18
+            model.fc = nn.Linear(model.fc.in_features, 10)  # MNIST 클래스 수: 10
 
-                if not os.path.exists(MODEL_PATH):
-                    raise FileNotFoundError(f"모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
+            if not os.path.exists(MODEL_PATH):
+                raise FileNotFoundError(f"모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
                     
-                state_dict = torch.load(MODEL_PATH, map_location=torch.device("cpu"))
-                model.load_state_dict(state_dict)
-                model.eval()    # 모델을 evaluation 모드로 전환
+            state_dict = torch.load(MODEL_PATH, map_location=torch.device("cpu"))
+            model.load_state_dict(state_dict)
+            model.eval()    # 모델을 evaluation 모드로 전환
 
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                model.to(device)
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model.to(device)
                 
-                self._model = model
+            self._model = model
         return self._model
 
     def register_hooks(self, model: torch.nn.Module):
@@ -52,30 +52,16 @@ class FeatureMapProcessor:
         model.fc.register_forward_hook(save_fc("fc"))
 
     def process_image(self, pil_image, model: torch.nn.Module):
-        # 흑백 반전: RGB만 반전(알파는 유지), 디버깅 평균값 출력
-        import numpy as np
-        from PIL import Image
-
-        img_array = np.array(pil_image)
-        if img_array.ndim == 3 and img_array.shape[2] == 4:
-            # RGBA: RGB만 반전, A는 그대로 유지
-            inverted_array = img_array.copy()
-            inverted_array[..., :3] = 255 - inverted_array[..., :3]
-        else:
-            # RGB 또는 그레이: 전체 채널 반전
-            inverted_array = 255 - img_array
-
-        pil_image = Image.fromarray(inverted_array.astype(np.uint8))
-        
         transform = transforms.Compose([
-            transforms.Resize(224, 224),                # ResNet18 입력 크기 224x224
+            transforms.Resize(224),                # ResNet18 입력 크기 224x224
             transforms.Grayscale(num_output_channels=3),  # 1채널 → 3채널
+            transforms.Lambda(lambda img: ImageOps.invert(img)),
             transforms.ToTensor(),
             transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5)) 
         ])
 
         tensor = transform(pil_image).unsqueeze(0)
-        _ = model(tensor)   # forward 실행 → hook으로 feature 저장
+        _ = model(tensor)  # forward 실행 → hook으로 feature 저장
 
     def normalization(self, arr: torch.Tensor):
         arr = arr.cpu().numpy()
@@ -84,7 +70,7 @@ class FeatureMapProcessor:
 
         # 0~255 정규화
         normalized = ((arr - arr_min) / (arr_max - arr_min)) * 255
-        normalized = normalized.astype(np.uint8) 
+        normalized = normalized.astype(np.uint8)
         return normalized
 
     def get_normalized_outputs(self, pil_image=None):
@@ -108,7 +94,6 @@ class FeatureMapProcessor:
                 self.last_result = {"layers": {**fmap_out, **fc_out}}
 
             return self.last_result
-
 
 # 싱글톤 인스턴스 생성
 processor = FeatureMapProcessor()
