@@ -55,7 +55,6 @@ class FeatureMapProcessor:
         transform = transforms.Compose([
             transforms.Resize(224),                # ResNet18 입력 크기 224x224
             transforms.Grayscale(num_output_channels=3),  # 1채널 → 3채널
-            transforms.Lambda(lambda img: ImageOps.invert(img)),
             transforms.ToTensor(),
             transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5)) 
         ])
