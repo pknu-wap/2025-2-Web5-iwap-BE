@@ -27,3 +27,11 @@ async def upload_inside_image(num_image: UploadFile = File(...)):
     pil_img = Image.open(io.BytesIO(contents))
     result = get_normalized_outputs(pil_img)   # 새 이미지로 계산
     return result
+
+@app.get("/api/piano/")
+def get_MIDI():
+    return {"message": "아직 구현되지 않음"}
+
+@app.post("/api/piano/")
+async def upload_MIDI(file: UploadFile = File(...)):
+    return {"message": "아직 구현되지 않음"}
