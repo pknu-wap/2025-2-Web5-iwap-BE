@@ -6,6 +6,7 @@ import numpy as np
 import librosa
 import pretty_midi
 import json
+from pathlib import Path
 
 def freq_to_midi(freq: int) -> int:
     """
@@ -30,12 +31,17 @@ def freq_to_midi(freq: int) -> int:
     return int(np.round(69 + 12 * np.log2(freq / 440.0)))
 
 
-def talking_piano(config_path):
+def talking_piano(config_path=None):
     # ----------------------------------------------------------
     # 설정
     # ----------------------------------------------------------
-    with open(config_path, "r") as config_path:
-        configs = json.load(config_path)
+    if config_path is None:     # config.json을 services/p!ano/로 옮겨서 현재 파일 기준 경로를 기본값으로 사용
+        config_path = Path(__file__).with_name("config.json")
+    else:
+        config_path = Path(config_path)
+
+    with config_path.open("r") as config_file:
+        configs = json.load(config_file)
     mp3_path = configs["mp3_path"]
     output_midi_path = configs["output_midi_path"]
     n_fft = configs["n_fft"]
@@ -86,5 +92,5 @@ def talking_piano(config_path):
     print(f"MIDI 생성 완료: {output_midi_path}")
 
 if __name__ == "__main__":
-    configs = "config.json"
+    configs = Path(__file__).with_name("config.json")
     talking_piano(configs)

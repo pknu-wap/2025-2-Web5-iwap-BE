@@ -210,3 +210,4 @@ data/*
 echo "feature_maps/" >> .gitignore
 
 *.json
+!config.json
