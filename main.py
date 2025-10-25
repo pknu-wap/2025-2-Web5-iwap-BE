@@ -11,6 +11,7 @@ from services.piano.audio_to_MIDI import talking_piano
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 #----------------------inside----------------------#
@@ -19,6 +20,13 @@ LOG_FILE = os.path.join(os.getcwd(), 'image_processing.log')
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO)
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 마지막 결과 조회 API

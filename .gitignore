@@ -211,3 +211,6 @@ echo "feature_maps/" >> .gitignore
 
 *.json
 !config.json
+
+public/*.mp3
+public/*.mid
