@@ -20,9 +20,16 @@ LOG_FILE = os.path.join(os.getcwd(), 'image_processing.log')
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO)
 
 app = FastAPI()
+# CORS: 프론트 개발 도메인(포트) 명시. credentials 사용 시 * 금지
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -76,16 +83,31 @@ def get_MIDI():
 # audio 파일 업로드 후 MIDI 변환 API
 @app.post("/api/piano/")
 async def upload_MIDI(voice: UploadFile = File(...)):
-    allowed_types = {"audio/mpeg", "audio/mp3"}
+    # 업로드 허용 타입 확장: mp3, webm, wav
+    allowed_types = {"audio/mpeg", "audio/mp3", "audio/webm", "audio/wav"}
     if voice.content_type not in allowed_types:
         raise HTTPException(
             status_code=400,
-            detail="MP3 파일만 업로드할 수 있습니다.",
+            detail="지원하지 않는 오디오 타입입니다.",
     )
-    
+    # 저장 파일 확장자 매핑
+    ext_by_type = {
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/webm": ".webm",
+        "audio/wav": ".wav",
+    }
+
     contents = await voice.read()
-    with open(mp3_path, "wb") as mp3_file:
-        mp3_file.write(contents)
-    
-    talking_piano()   # mp3_path에 저장된 파일로 MIDI 변환
+
+    # 입력 저장 경로를 config의 mp3_path 디렉터리를 기준으로 생성
+    input_dir = Path(mp3_path).parent
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_path = mp3_path
+
+    with open(input_path, "wb") as in_file:
+        in_file.write(contents)
+
+    # 업로드된 경로를 사용해 MIDI 변환 수행 (출력 경로도 config와 일치)
+    talking_piano()
     return {"message": "MIDI 변환이 완료되었습니다."}
