@@ -209,3 +209,4 @@ __marimo__/
 data/*
 echo "feature_maps/" >> .gitignore
 test/images/*
+prometheus-3.6.0.windows-amd64/*
