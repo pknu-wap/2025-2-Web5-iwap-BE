@@ -208,5 +208,5 @@ __marimo__/
 
 data/*
 echo "feature_maps/" >> .gitignore
-test/images/*
+*.json
 prometheus-3.6.0.windows-amd64/*

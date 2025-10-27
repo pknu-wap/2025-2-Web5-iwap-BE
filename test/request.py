@@ -4,7 +4,7 @@ import random
 import os
 
 API_URL = "http://127.0.0.1:8000/api/inside/" # 테스트할 API 엔드포인트
-REQUEST_INTERVAL = 3  # 요청 간격 (초)
+REQUEST_INTERVAL = 1  # 요청 간격 (초)
 
 def periodic_requester():
     """지정된 간격으로 API에 이미지 파일과 함께 POST 요청을 계속 보냅니다."""
