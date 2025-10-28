@@ -1,0 +1,79 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # 관리 UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports: ["6379:6379"]
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./api
+    container_name: api
+    image: api
+    env_file: .env
+    volumes:
+      - ./api:/app
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*"
+
+  inside-worker:
+    build: ./services/inside
+    container_name: inside-worker
+    image: inside-worker
+    volumes:
+      - ./services/inside:/worker
+      - ./services/inside/resnet18_mnist.pth:/worker/resnet18_mnist.pth
+    env_file: .env
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    command: celery -A tasks.celery_app worker -Q inside.q --concurrency=2 --prefetch-multiplier=4 --loglevel=INFO
+
+  # piano-worker:
+  #   build: ./services/piano
+  #   container_name: piano-worker
+  #   env_file: .env
+  #   depends_on:
+  #     rabbitmq: { condition: service_healthy }
+  #     redis: { condition: service_healthy }
+  #   command: celery -A tasks.celery_app worker -Q piano.q --concurrency=2 --prefetch-multiplier=4 --loglevel=INFO
+
+  flower:
+    image: mher/flower:latest
+    container_name: flower
+    env_file: .env
+    depends_on:
+      - rabbitmq
+      - redis
+    ports:
+      - "5555:5555"
+    environment:
+      - RABBITMQ_USER=${RABBITMQ_USER}
+      - RABBITMQ_PASS=${RABBITMQ_PASS}
+    command: >
+      celery --broker=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672 --result-backend=redis://redis:6379/0
+      flower
+      --port=5555
