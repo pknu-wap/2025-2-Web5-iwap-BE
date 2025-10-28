@@ -6,9 +6,6 @@ import os
 from typing import Optional, Dict, Any
 from PIL import ImageOps
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_PATH = os.path.join(BASE_DIR, "public", "resnet18_mnist.pth")
-
 class FeatureMapProcessor:
     def __init__(self):
         self.feature_maps: Dict[str, torch.Tensor] = {}
@@ -21,10 +18,10 @@ class FeatureMapProcessor:
             model = models.resnet18(weights=None)  # 학습용 ResNet18
             model.fc = nn.Linear(model.fc.in_features, 10)  # MNIST 클래스 수: 10
 
-            if not os.path.exists(MODEL_PATH):
-                raise FileNotFoundError(f"모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
+            if not os.path.exists("resnet18_mnist.pth"):
+                raise FileNotFoundError(f"모델 파일을 찾을 수 없습니다: resnet18_mnist.pth")
                     
-            state_dict = torch.load(MODEL_PATH, map_location=torch.device("cpu"))
+            state_dict = torch.load("resnet18_mnist.pth", map_location=torch.device("cpu"))
             model.load_state_dict(state_dict)
             model.eval()    # 모델을 evaluation 모드로 전환
 
