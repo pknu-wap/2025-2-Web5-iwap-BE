@@ -1,0 +1,8 @@
+fastapi==0.116.2
+pydantic==2.11.9
+pydantic_core==2.33.2
+python-multipart==0.0.20
+uvicorn==0.35.0
+kombu==5.5.4
+redis==7.0.1
+celery==5.5.3
