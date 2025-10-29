@@ -2,11 +2,22 @@
 # p!ano
 # Mac OS에서 GarageBand나 Logic을 이용해서 test 가능
 # ----------------------------------------------------------
+import os
 import numpy as np
 import librosa
 import pretty_midi
 import json
 from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+n_fft = 2048
+hop_length = 512
+velocity = 100
+threshold_ratio = 0.1
+note_duration = 0.5
+  
+MP3_PATH = Path(os.getenv("PIANO_MP3_PATH", "public/input.mp3"))
+OUTPUT_MIDI_PATH = Path(os.getenv("PIANO_OUTPUT_MIDI_PATH", "public/output.mid"))
 
 def freq_to_midi(freq: int) -> int:
     """
@@ -31,29 +42,11 @@ def freq_to_midi(freq: int) -> int:
     return int(np.round(69 + 12 * np.log2(freq / 440.0)))
 
 
-def talking_piano(config_path=None):
-    # ----------------------------------------------------------
-    # 설정
-    # ----------------------------------------------------------
-    if config_path is None:     # config.json을 services/p!ano/로 옮겨서 현재 파일 기준 경로를 기본값으로 사용
-        config_path = Path(__file__).with_name("config.json")
-    else:
-        config_path = Path(config_path)
-
-    with config_path.open("r") as config_file:
-        configs = json.load(config_file)
-    mp3_path = configs["mp3_path"]
-    output_midi_path = configs["output_midi_path"]
-    n_fft = configs["n_fft"]
-    hop_length = configs["hop_length"]
-    velocity = configs["velocity"]
-    threshold_ratio = configs["threshold_ratio"]
-    note_duration = configs["note_duration"]
-
+def talking_piano():
     # ----------------------------------------------------------
     # 1. MP3 로드
     # ----------------------------------------------------------
-    y, sr = librosa.load(mp3_path, sr=44100, mono=True)
+    y, sr = librosa.load(MP3_PATH, sr=44100, mono=True)
 
     # ----------------------------------------------------------
     # 2. STFT(Short-time Fourier transform) 계산
@@ -87,10 +80,9 @@ def talking_piano(config_path=None):
                     piano.notes.append(note)
 
     midi.instruments.append(piano)
-    midi.write(output_midi_path)
+    midi.write(OUTPUT_MIDI_PATH)
 
-    print(f"MIDI 생성 완료: {output_midi_path}")
+    print(f"MIDI 생성 완료: {OUTPUT_MIDI_PATH}")
 
 if __name__ == "__main__":
-    configs = Path(__file__).with_name("config.json")
-    talking_piano(configs)
+    talking_piano()
