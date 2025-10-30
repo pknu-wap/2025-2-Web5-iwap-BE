@@ -3,6 +3,14 @@
 # Mac OS에서 GarageBand나 Logic을 이용해서 test 가능
 # ----------------------------------------------------------
 import os
+from pathlib import Path as _PathForNumbaConfig
+
+NUMBA_CACHE_DIR = _PathForNumbaConfig(__file__).resolve().parent / ".numba_cache"
+NUMBA_CACHE_DIR.mkdir(exist_ok=True)
+os.environ.setdefault("NUMBA_CACHE_DIR", str(NUMBA_CACHE_DIR))
+
+import numba  # noqa: E402
+numba.config.DISABLE_CACHE = True
 import numpy as np
 import librosa
 import pretty_midi
@@ -80,7 +88,7 @@ def talking_piano():
                     piano.notes.append(note)
 
     midi.instruments.append(piano)
-    midi.write(OUTPUT_MIDI_PATH)
+    midi.write(str(OUTPUT_MIDI_PATH))
 
     print(f"MIDI 생성 완료: {OUTPUT_MIDI_PATH}")
 
