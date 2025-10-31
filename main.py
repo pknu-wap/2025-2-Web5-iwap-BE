@@ -1,6 +1,5 @@
 import io
 import logging
-import os
 from pathlib import Path
 import json
 
@@ -18,8 +17,8 @@ from services.inside.inside_return_featuremap import get_normalized_outputs
 from services.piano.audio_to_MIDI import talking_piano
 
 #----------------------inside----------------------#
-LOG_FILE = os.path.join(os.getcwd(), 'image_processing.log')
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO)
+LOG_FILE = Path.cwd() / "image_processing.log"
+logging.basicConfig(filename=str(LOG_FILE), level=logging.INFO)
 
 app = FastAPI()
 
@@ -118,8 +117,7 @@ async def upload_MIDI(voice: UploadFile = File(...)):
 
     # 파일 저장
     contents = await voice.read()
-    with open(mp3_path, "wb") as mp3_file:
-        mp3_file.write(contents)
+    mp3_path.write_bytes(contents)
 
     # ✅ webm/wav 입력 시 자동으로 mp3로 변환
     try:
