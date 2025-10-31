@@ -14,9 +14,15 @@ from fastapi.responses import FileResponse
 from pydub import AudioSegment
 
 from services.inside.inside_return_featuremap import get_normalized_outputs
-from services.piano.audio_to_MIDI import talking_piano
+from services.piano.audio_to_midi import talking_piano
 
 #----------------------inside----------------------#
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://2025-2-web5-iwap-fe-git-6-45bcd4-nayoung-kims-projects-01021d17.vercel.app",
+]
+
 LOG_FILE = Path.cwd() / "image_processing.log"
 logging.basicConfig(filename=str(LOG_FILE), level=logging.INFO)
 
@@ -25,7 +31,7 @@ app = FastAPI()
 # ✅ CORS 허용 (프론트와 연결용)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
