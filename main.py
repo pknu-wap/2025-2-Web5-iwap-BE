@@ -35,6 +35,12 @@ logging.basicConfig(filename=str(LOG_FILE), level=logging.INFO)
 app = FastAPI()
 
 # ✅ CORS 허용 (프론트와 연결용)
+allow_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://2025-2-web5-iwap-fe-git-6-45bcd4-nayoung-kims-projects-01021d17.vercel.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
