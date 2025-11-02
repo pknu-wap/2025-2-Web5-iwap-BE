@@ -27,6 +27,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://2025-2-web5-iwap-fe-git-6-45bcd4-nayoung-kims-projects-01021d17.vercel.app",
+    "https://2025-2-web5-iwap-fe.vercel.app/piano"
 ]
 
 LOG_FILE = Path.cwd() / "image_processing.log"
