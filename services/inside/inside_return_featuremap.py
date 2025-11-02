@@ -2,12 +2,12 @@ import torch
 import torch.nn as nn  # 자동 손실, 정확도 계산해주는 라이브러리
 from torchvision import transforms, models
 import numpy as np
-import os
+from pathlib import Path
 from typing import Optional, Dict, Any
 from PIL import ImageOps
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_PATH = os.path.join(BASE_DIR, "public", "resnet18_mnist.pth")
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+MODEL_PATH = BASE_DIR / "public" / "resnet18_mnist.pth"
 
 class FeatureMapProcessor:
     def __init__(self):
@@ -21,7 +21,7 @@ class FeatureMapProcessor:
             model = models.resnet18(weights=None)  # 학습용 ResNet18
             model.fc = nn.Linear(model.fc.in_features, 10)  # MNIST 클래스 수: 10
 
-            if not os.path.exists(MODEL_PATH):
+            if not MODEL_PATH.exists():
                 raise FileNotFoundError(f"모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
                     
             state_dict = torch.load(MODEL_PATH, map_location=torch.device("cpu"))

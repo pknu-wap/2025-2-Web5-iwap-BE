@@ -2,7 +2,6 @@ import io
 import logging
 import os
 from pathlib import Path
-import json
 
 from PIL import Image
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -15,24 +14,30 @@ from fastapi.responses import FileResponse
 from pydub import AudioSegment
 
 from services.inside.inside_return_featuremap import get_normalized_outputs
-from services.piano.audio_to_MIDI import talking_piano
+from services.piano.audio_to_midi import talking_piano
+from services.piano.constants import (
+    DEFAULT_MP3_PATH,
+    DEFAULT_MIDI_PATH,
+    ENV_MP3_PATH,
+    ENV_MIDI_PATH
+)
 
 #----------------------inside----------------------#
-LOG_FILE = os.path.join(os.getcwd(), 'image_processing.log')
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO)
-
-app = FastAPI()
-
-# ✅ CORS 허용 (프론트와 연결용)
-allow_origins = [
+ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://2025-2-web5-iwap-fe-git-6-45bcd4-nayoung-kims-projects-01021d17.vercel.app",
+    "https://2025-2-web5-iwap-fe.vercel.app/piano"
 ]
+
+LOG_FILE = Path.cwd() / "image_processing.log"
+logging.basicConfig(filename=str(LOG_FILE), level=logging.INFO)
+
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,56 +61,48 @@ async def upload_inside_image(num_image: UploadFile = File(...)):
 
 
 #----------------------piano----------------------#
-BASE_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = BASE_DIR / "services" / "piano" / "config.json"
+mp3_path_env = os.getenv(ENV_MP3_PATH)
+midi_path_env = os.getenv(ENV_MIDI_PATH)
 
-with CONFIG_PATH.open("r") as config_file:
-    configs = json.load(config_file)
-
-# MP3 및 MIDI 파일 경로 설정
-mp3_path = Path(configs["mp3_path"])
-if not mp3_path.is_absolute():
-    mp3_path = BASE_DIR / mp3_path
-midi_path = Path(configs["output_midi_path"])
-if not midi_path.is_absolute():
-    midi_path = BASE_DIR / midi_path
+MP3_PATH = Path(mp3_path_env) if mp3_path_env else DEFAULT_MP3_PATH
+MIDI_PATH = Path(midi_path_env) if midi_path_env else DEFAULT_MIDI_PATH
 
 
 # 변환된 MIDI 파일 조회 API
 @app.get("/api/piano/")
 def get_MIDI():
-    if not midi_path.exists():
+    if not MIDI_PATH.exists():
         raise HTTPException(status_code=404, detail="변환된 MIDI가 없습니다.")
-    midi_file = midi_path.open("rb")
+    midi_file = MIDI_PATH.open("rb")
     return StreamingResponse(
         midi_file,
         media_type="audio/midi",
-        headers={"Content-Disposition": f'attachment; filename=\"{midi_path.name}\"'},
+        headers={"Content-Disposition": f'attachment; filename=\"{MIDI_PATH.name}\"'},
     )
 
 @app.get("/api/piano/mp3")
 def get_converted_mp3():
     """백엔드에 저장된 변환 mp3 파일을 브라우저에서 들을 수 있도록 반환"""
-    if not mp3_path.exists():
+    if not MP3_PATH.exists():
         raise HTTPException(status_code=404, detail="변환된 MP3가 없습니다.")
     
     return FileResponse(
-        path=mp3_path,
+        path=MP3_PATH,
         media_type="audio/mpeg",
-        filename=mp3_path.name
+        filename=MP3_PATH.name
     )
 
 
 @app.get("/api/piano/midi")
 def get_converted_midi():
     """백엔드에 저장된 변환된 MIDI 파일 다운로드용"""
-    if not midi_path.exists():
+    if not MIDI_PATH.exists():
         raise HTTPException(status_code=404, detail="변환된 MIDI가 없습니다.")
     
     return FileResponse(
-        path=midi_path,
+        path=MIDI_PATH,
         media_type="audio/midi",
-        filename=midi_path.name
+        filename=MIDI_PATH.name
     )
 
 
@@ -124,17 +121,16 @@ async def upload_MIDI(voice: UploadFile = File(...)):
 
     # 파일 저장
     contents = await voice.read()
-    with open(mp3_path, "wb") as mp3_file:
-        mp3_file.write(contents)
+    MP3_PATH.write_bytes(contents)
 
     # ✅ webm/wav 입력 시 자동으로 mp3로 변환
     try:
         if voice.content_type == "audio/webm":
             print("INFO >> webm → mp3 변환 중...")
-            AudioSegment.from_file(mp3_path, format="webm").export(mp3_path, format="mp3")
+            AudioSegment.from_file(MP3_PATH, format="webm").export(MP3_PATH, format="mp3")
         elif voice.content_type == "audio/wav":
             print("INFO >> wav → mp3 변환 중...")
-            AudioSegment.from_file(mp3_path, format="wav").export(mp3_path, format="mp3")
+            AudioSegment.from_file(MP3_PATH, format="wav").export(MP3_PATH, format="mp3")
     except Exception as e:
         print("ERROR >> webm/wav 변환 실패:", e)
         raise HTTPException(status_code=500, detail="webm/wav → mp3 변환 실패")
