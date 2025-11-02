@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from PIL import ImageOps
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 MODEL_PATH = BASE_DIR / "public" / "resnet18_mnist.pth"
 
 class FeatureMapProcessor:
