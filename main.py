@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from pydub import AudioSegment
 
 from services.inside.inside_return_featuremap import get_normalized_outputs
-from services.piano.audio_to_midi import talking_piano
+from services.piano.audio_to_MIDI import talking_piano
 from services.piano.constants import (
     DEFAULT_MP3_PATH,
     DEFAULT_MIDI_PATH,
