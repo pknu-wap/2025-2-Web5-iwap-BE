@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from pydub import AudioSegment
 
 from services.inside.inside_return_featuremap import get_normalized_outputs
-from services.piano.audio_to_MIDI import talking_piano
+from services.piano.audio_to_midi import talking_piano
 from services.piano.constants import (
     DEFAULT_MP3_PATH,
     DEFAULT_MIDI_PATH,
@@ -27,7 +27,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://2025-2-web5-iwap-fe-git-6-45bcd4-nayoung-kims-projects-01021d17.vercel.app",
-    "https://2025-2-web5-iwap-fe.vercel.app/piano"
+    "https://2025-2-web5-iwap-fe.vercel.app/piano",
     "https://iwap.kro.kr/"
 ]
 
