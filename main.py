@@ -113,7 +113,7 @@ def get_converted_mp3():
 
 
 @app.get("/api/piano/midi_to_mp3")
-def get_converted_midi():
+def get_converted_mp3():
     """백엔드에 저장된 변환된 MIDI 파일 다운로드용"""
     if not MIDI_PATH.exists():
         raise HTTPException(status_code=404, detail="변환된 MIDI가 없습니다.")
