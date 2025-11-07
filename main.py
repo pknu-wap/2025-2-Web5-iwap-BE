@@ -1,8 +1,11 @@
 import io
 import logging
 import os
+import shutil
 from pathlib import Path
 
+import pretty_midi
+import soundfile as sf
 from PIL import Image
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.gzip import GZipMiddleware
@@ -68,6 +71,21 @@ midi_path_env = os.getenv(ENV_MIDI_PATH)
 MP3_PATH = Path(mp3_path_env) if mp3_path_env else DEFAULT_MP3_PATH
 MIDI_PATH = Path(midi_path_env) if midi_path_env else DEFAULT_MIDI_PATH
 
+def _midi_to_mp3_bytes(midi_path: Path, sample_rate: int = 44100) -> bytes:
+    """Render a MIDI file to MP3 bytes using pretty_midi + pydub."""
+    midi_data = pretty_midi.PrettyMIDI(str(midi_path))
+    audio = midi_data.synthesize(fs=sample_rate)
+    if audio.size == 0:
+        raise ValueError("MIDI 파일에 음표가 없어 변환할 수 없습니다.")
+
+    wav_buffer = io.BytesIO()
+    sf.write(wav_buffer, audio, sample_rate, format="WAV")
+    wav_buffer.seek(0)
+
+    mp3_buffer = io.BytesIO()
+    AudioSegment.from_file(wav_buffer, format="wav").export(mp3_buffer, format="mp3")
+    return mp3_buffer.getvalue()
+
 
 # 변환된 MIDI 파일 조회 API
 @app.get("/api/piano/")
@@ -94,16 +112,26 @@ def get_converted_mp3():
     )
 
 
-@app.get("/api/piano/midi")
+@app.get("/api/piano/midi_to_mp3")
 def get_converted_midi():
     """백엔드에 저장된 변환된 MIDI 파일 다운로드용"""
     if not MIDI_PATH.exists():
         raise HTTPException(status_code=404, detail="변환된 MIDI가 없습니다.")
-    
-    return FileResponse(
-        path=MIDI_PATH,
-        media_type="audio/midi",
-        filename=MIDI_PATH.name
+
+    try:
+        mp3_bytes = _midi_to_mp3_bytes(MIDI_PATH)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # pretty_midi or mp3 export failure
+        raise HTTPException(status_code=500, detail="MIDI → MP3 변환 실패") from exc
+
+    mp3_filename = f"{MIDI_PATH.stem}.mp3"
+    return StreamingResponse(
+        io.BytesIO(mp3_bytes),
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": f'attachment; filename="{mp3_filename}"'}
     )
 
 
