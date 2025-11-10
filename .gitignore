@@ -215,3 +215,9 @@ echo "feature_maps/" >> .gitignore
 public/*.mp3
 public/*.mid
 services/piano/.numba_cache/
+
+#string
+/.idea/
+venv/
+*.png
+*.jpg
