@@ -1,17 +1,16 @@
 import io
+import json
 import logging
 import os
-import shutil
 from pathlib import Path
 
 import pretty_midi
 import soundfile as sf
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 
 # 🔹 추가 import (webm → mp3 변환용)
 from pydub import AudioSegment
@@ -24,7 +23,11 @@ from services.piano.constants import (
     ENV_MP3_PATH,
     ENV_MIDI_PATH
 )
-
+from services.string.generate import StringArtOptions
+from services.string.service import (
+    StringArtImageError,
+    generate_string_metadata,
+)
 #----------------------inside----------------------#
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -183,3 +186,66 @@ async def upload_MIDI(voice: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"message": "MIDI 변환이 완료되었습니다."}
+
+#----------------------Str!ng----------------------#
+LAST_RESULT_PATH = Path.cwd() / "services" / "string" / "last_result.json"
+LAST_RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+@app.get("/api/string/")
+async def get_string_result():
+    """
+    POST 요청으로 생성된 JSON 결과를 프론트로 반환
+    """
+    if not LAST_RESULT_PATH.exists():
+        raise HTTPException(status_code=404, detail="아직 생성된 스트링 아트가 없습니다.")
+    
+    # 파일에 저장된 JSON을 읽어서 그대로 반환
+    result = json.loads(LAST_RESULT_PATH.read_text(encoding="utf-8"))
+    return JSONResponse(content=result)
+    
+@app.post("/api/string/")
+async def upload_image(
+    file: UploadFile = File(...),
+    radius: int = Form(50),           # -r (랜덤으로 선택할 못 개수)
+    limit: int = Form(5000),          # -l (실행 최대 횟수)
+    rgb: bool = Form(True),           # --rgb
+    wb: bool = Form(True),            # --wb (배경색 반전)
+    nail_step: int = Form(4),         # -n
+    strength: float = Form(0.1)  
+):
+    """
+    사용자가 이미지 업로드, 스트링 아트 설정값 보냄 -> 스트링 아트로 변환
+    """
+    try:
+        contents = await file.read()
+        options = StringArtOptions(
+            side_len=300,
+            export_strength=strength,
+            pull_amount=limit,
+            random_nails=radius,
+            nail_step=nail_step,
+            wb=wb,
+            rgb=rgb,
+        )
+        metadata = generate_string_metadata(contents, options)
+
+        result_payload = {
+            "status": "success",
+            "message": "String Art nail 데이터 생성 완료",
+            "mode": metadata["mode"],
+            "pullOrders": metadata["pullOrders"],
+            "nails": metadata["nails"],
+            "scaledNails": metadata["scaledNails"]
+        }
+
+        LAST_RESULT_PATH.write_text(
+            json.dumps(result_payload, ensure_ascii=False),
+            encoding="utf-8"
+        )
+
+        return result_payload
+        
+    except StringArtImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"서버 내부 오류: {e}")
