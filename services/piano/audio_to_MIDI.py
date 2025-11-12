@@ -19,7 +19,9 @@ try:
         HOP_LENGTH,
         VELOCITY,
         THRESHOLD_RATIO,
-        NOTE_DURATION
+        NOTE_DURATION,
+        MAX_MELODY_FREQ,
+        MAX_NOTE_JUMP
     )
 except ImportError:
     print("Warning: constants.py not found. Using fallback values.")
@@ -29,6 +31,7 @@ except ImportError:
     FINAL_MP3_PATH = BASE_DIR / "public" / "output_piano.mp3"
     SOUNDFONT_PATH = BASE_DIR / "public" / "soundfont.sf2"
     N_FFT, HOP_LENGTH, VELOCITY, THRESHOLD_RATIO, NOTE_DURATION = 2048, 512, 100, 0.1, 0.1
+    MAX_MELODY_FREQ, MAX_NOTE_JUMP = 3000, 24
 
 def freq_to_midi(frequency: float) -> int:
     if frequency <= 0:
@@ -50,14 +53,19 @@ def talking_piano() -> (pretty_midi.PrettyMIDI, int):
     frequencies = librosa.fft_frequencies(sr=sample_rate, n_fft=N_FFT)
     times = librosa.frames_to_time(np.arange(spectrogram.shape[1]), sr=sample_rate, hop_length=HOP_LENGTH)
 
+    max_freq_index = np.searchsorted(frequencies, MAX_MELODY_FREQ)
+    if max_freq_index == 0:
+        max_freq_index = len(frequencies)
+
     midi_file = pretty_midi.PrettyMIDI()
     piano_instrument = pretty_midi.Instrument(program=0)
     threshold_value = THRESHOLD_RATIO * np.max(spectrogram)
     
     current_note = None
+    last_note_pitch = None
     
     for time_index, time_value in enumerate(times):
-        spectrum_slice = spectrogram[:, time_index]
+        spectrum_slice = spectrogram[:max_freq_index, time_index]
         peak_index = np.argmax(spectrum_slice)
         peak_magnitude = spectrum_slice[peak_index]
         
@@ -69,6 +77,14 @@ def talking_piano() -> (pretty_midi.PrettyMIDI, int):
             if not (0 <= note_number <= 127):
                 note_number = -1
         
+        if note_number != -1:
+            if last_note_pitch is not None and abs(note_number - last_note_pitch) > MAX_NOTE_JUMP:
+                note_number = -1
+            else:
+                last_note_pitch = note_number
+        else:
+            last_note_pitch = None
+
         if note_number != -1:
             if current_note is None:
                 current_note = pretty_midi.Note(
