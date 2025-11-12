@@ -33,6 +33,7 @@ typing_extensions==4.15.0
 uvicorn==0.35.0
 torchvision==0.23.0
 python-multipart==0.0.20
+python-dotenv==1.0.1
 
 #--------------- piano ---------------
 pydub==0.25.1
