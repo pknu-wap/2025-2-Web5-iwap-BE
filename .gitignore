@@ -212,6 +212,6 @@ echo "feature_maps/" >> .gitignore
 *.json
 !config.json
 
-public/*.mp3
-public/*.mid
+*.mp3
+*.mid
 services/piano/.numba_cache/
