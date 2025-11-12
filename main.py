@@ -14,12 +14,14 @@ from fastapi.responses import FileResponse
 from pydub import AudioSegment
 
 from services.inside.inside_return_featuremap import get_normalized_outputs
-from services.piano.audio_to_midi import talking_piano
+from services.piano.audio_to_midi import talking_piano, midi_to_mp3_bytes
 from services.piano.constants import (
     DEFAULT_MP3_PATH,
     DEFAULT_MIDI_PATH,
     ENV_MP3_PATH,
-    ENV_MIDI_PATH
+    ENV_MIDI_PATH,
+    SOUNDFONT_PATH,
+    FINAL_MP3_PATH
 )
 
 #----------------------inside----------------------#
@@ -138,7 +140,28 @@ async def upload_MIDI(voice: UploadFile = File(...)):
 
     # ✅ MIDI 변환 실행
     try:
-        talking_piano()
+        midi_obj, sr = talking_piano()
+    
+        if midi_obj and sr > 0:
+            try:
+                mp3_bytes = midi_to_mp3_bytes(midi_obj, SOUNDFONT_PATH, sample_rate=sr)
+                
+                FINAL_MP3_PATH.parent.mkdir(parents=True, exist_ok=True)
+                with open(FINAL_MP3_PATH, "wb") as f:
+                    f.write(mp3_bytes)
+                    
+                print(f"\n성공! 최종 MP3 파일이 저장되었습니다: {FINAL_MP3_PATH}")
+                print(f"파일 크기: {len(mp3_bytes) / 1024:.2f} KB")
+
+            except FileNotFoundError:
+                print("변환에 실패했습니다. (필수 프로그램 설치 확인)")
+            except ValueError as e:
+                print(f"변환 중 값 오류 발생: {e}")
+            except Exception as e:
+                print(f"알 수 없는 오류 발생: {e}")
+            
+        else:
+            print("MP3 -> MIDI 변환에 실패하여 MP3를 생성할 수 없습니다.")
     except Exception as e:
         print("ERROR >> talking_piano 실패:", e)
         raise HTTPException(status_code=500, detail=str(e))
