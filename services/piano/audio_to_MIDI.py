@@ -11,9 +11,9 @@ from pydub import AudioSegment
 
 try:
     from services.piano.constants import (
-        DEFAULT_MP3_PATH,
-        DEFAULT_MIDI_PATH,
-        FINAL_MP3_PATH,
+        DEFAULT_MP3_DIR,
+        DEFAULT_MIDI_DIR,
+        DEFAULT_FINAL_MP3_DIR,
         SOUNDFONT_PATH,
         N_FFT,
         HOP_LENGTH,
@@ -26,9 +26,9 @@ try:
 except ImportError:
     print("Warning: constants.py not found. Using fallback values.")
     BASE_DIR = Path(__file__).parents[2]
-    DEFAULT_MP3_PATH = BASE_DIR / "public" / "input.mp3"
-    DEFAULT_MIDI_PATH = BASE_DIR / "public" / "output.mid"
-    FINAL_MP3_PATH = BASE_DIR / "public" / "output_piano.mp3"
+    DEFAULT_MP3_DIR = BASE_DIR / "public" / "mp3"
+    DEFAULT_MIDI_DIR = BASE_DIR / "public" / "midi"
+    DEFAULT_FINAL_MP3_DIR = BASE_DIR / "public" / "piano_mp3"
     SOUNDFONT_PATH = BASE_DIR / "public" / "soundfont.sf2"
     N_FFT, HOP_LENGTH, VELOCITY, THRESHOLD_RATIO, NOTE_DURATION = 2048, 512, 100, 0.1, 0.1
     MAX_MELODY_FREQ, MAX_NOTE_JUMP = 3000, 24
@@ -38,13 +38,13 @@ def freq_to_midi(frequency: float) -> int:
         return -1
     return int(np.round(69 + 12 * np.log2(frequency / 440.0)))
 
-def talking_piano() -> (pretty_midi.PrettyMIDI, int):
-    if not DEFAULT_MP3_PATH.exists():
-        print(f"오류: MP3 파일을 찾을 수 없습니다. {DEFAULT_MP3_PATH}")
+def talking_piano(input_mp3_path: Path, midi_output_path: Path) -> (pretty_midi.PrettyMIDI, int):
+    if not input_mp3_path.exists():
+        print(f"오류: MP3 파일을 찾을 수 없습니다. {input_mp3_path}")
         return None, 0
     
     try:
-        audio_samples, sample_rate = librosa.load(str(DEFAULT_MP3_PATH), sr=44100, mono=True)
+        audio_samples, sample_rate = librosa.load(str(input_mp3_path), sr=44100, mono=True)
     except Exception as e:
         print(f"MP3 파일 로드 오류: {e}")
         return None, 0
@@ -103,9 +103,9 @@ def talking_piano() -> (pretty_midi.PrettyMIDI, int):
 
     midi_file.instruments.append(piano_instrument)
     
-    DEFAULT_MIDI_PATH.parent.mkdir(parents=True, exist_ok=True)
-    midi_file.write(str(DEFAULT_MIDI_PATH))
-    print(f"MIDI 생성 완료 (파일 저장): {DEFAULT_MIDI_PATH}")
+    midi_output_path.parent.mkdir(parents=True, exist_ok=True)
+    midi_file.write(str(midi_output_path))
+    print(f"MIDI 생성 완료 (파일 저장): {midi_output_path}")
     
     return midi_file, sample_rate
 
@@ -144,17 +144,24 @@ def midi_to_mp3_bytes(
 
 
 if __name__ == "__main__":
-    midi_obj, sr = talking_piano()
+    DEFAULT_MP3_DIR.mkdir(parents=True, exist_ok=True)
+    DEFAULT_MIDI_DIR.mkdir(parents=True, exist_ok=True)
+    DEFAULT_FINAL_MP3_DIR.mkdir(parents=True, exist_ok=True)
+
+    sample_mp3_path = DEFAULT_MP3_DIR / "input.mp3"
+    sample_midi_path = DEFAULT_MIDI_DIR / "output.mid"
+    sample_final_mp3_path = DEFAULT_FINAL_MP3_DIR / "output_piano.mp3"
+
+    midi_obj, sr = talking_piano(sample_mp3_path, sample_midi_path)
     
     if midi_obj and sr > 0:
         try:
             mp3_bytes = midi_to_mp3_bytes(midi_obj, SOUNDFONT_PATH, sample_rate=sr)
             
-            FINAL_MP3_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with open(FINAL_MP3_PATH, "wb") as f:
+            with open(sample_final_mp3_path, "wb") as f:
                 f.write(mp3_bytes)
                 
-            print(f"\n성공! 최종 MP3 파일이 저장되었습니다: {FINAL_MP3_PATH}")
+            print(f"\n성공! 최종 MP3 파일이 저장되었습니다: {sample_final_mp3_path}")
             print(f"파일 크기: {len(mp3_bytes) / 1024:.2f} KB")
 
         except FileNotFoundError:
