@@ -33,6 +33,7 @@ typing_extensions==4.15.0
 uvicorn==0.35.0
 torchvision==0.23.0
 python-multipart==0.0.20
+python-dotenv==1.0.1
 
 #--------------- piano ---------------
 pydub==0.25.1
@@ -51,7 +52,7 @@ mido==1.3.3
 msgpack==1.1.1
 numba==0.62.1
 #넘피 중복
-packaging==25.0
+#패키징 중복
 platformdirs==4.4.0
 pooch==1.8.2
 pretty_midi==0.2.10
@@ -60,7 +61,7 @@ requests==2.32.5
 scikit-learn==1.7.2
 scipy==1.16.2
 setuptools==80.9.0
-six==1.17.0
+# 식스 중복
 soundfile==0.13.1
 soxr==1.0.0
 standard-aifc==3.13.0
@@ -69,3 +70,22 @@ standard-sunau==3.13.0
 threadpoolctl==3.6.0
 typing_extensions==4.15.0
 urllib3==2.5.0
+
+#--------------- string ---------------
+contourpy==1.3.2
+cycler==0.12.1
+fonttools==4.60.0
+ImageIO==2.37.2
+kiwisolver==1.4.9
+lazy_loader==0.4
+matplotlib==3.10.6
+networkx==3.4.2
+numpy==2.2.6
+# 패키징 중복
+pillow==11.3.0
+pyparsing==3.2.4
+python-dateutil==2.9.0.post0
+scikit-image==0.25.2
+scipy==1.16.2
+# 식스 중복
+tifffile==2025.10.16
