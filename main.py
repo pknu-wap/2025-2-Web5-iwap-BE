@@ -10,7 +10,7 @@ import pretty_midi
 import soundfile as sf
 import numpy as np
 from PIL import Image, UnidentifiedImageError
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
