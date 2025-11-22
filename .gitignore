@@ -221,3 +221,7 @@ services/piano/.numba_cache/
 venv/
 *.png
 *.jpg
+
+#facial
+__pycache__/
+*.pkl
