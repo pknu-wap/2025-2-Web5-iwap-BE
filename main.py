@@ -105,22 +105,6 @@ MP3_DIR = _resolve_storage_dir(os.getenv(ENV_MP3_PATH), DEFAULT_MP3_DIR)
 MIDI_DIR = _resolve_storage_dir(os.getenv(ENV_MIDI_PATH), DEFAULT_MIDI_DIR)
 FINAL_MP3_DIR = _resolve_storage_dir(None, DEFAULT_FINAL_MP3_DIR)
 
-def _midi_to_mp3_bytes(midi_path: Path, sample_rate: int = 44100) -> bytes:
-    """Render a MIDI file to MP3 bytes using pretty_midi + pydub."""
-    midi_data = pretty_midi.PrettyMIDI(str(midi_path))
-    audio = midi_data.synthesize(fs=sample_rate)
-    if audio.size == 0:
-        raise ValueError("MIDI 파일에 음표가 없어 변환할 수 없습니다.")
-
-    wav_buffer = io.BytesIO()
-    sf.write(wav_buffer, audio, sample_rate, format="WAV")
-    wav_buffer.seek(0)
-
-    mp3_buffer = io.BytesIO()
-    AudioSegment.from_file(wav_buffer, format="wav").export(mp3_buffer, format="mp3")
-    return mp3_buffer.getvalue()
-
-
 @app.get("/api/piano/mp3")
 def get_converted_mp3(request_id: str = Query(..., description="요청 ID")):
     """백엔드에 저장된 변환 mp3 파일을 브라우저에서 들을 수 있도록 반환"""
@@ -153,28 +137,6 @@ def get_converted_midi(request_id: str = Query(..., description="요청 ID")):
         path=target_path,
         media_type="audio/midi",
         filename=request_id
-    )
-
-@app.get("/api/piano/midi_to_mp3")
-def get_converted_mp3():
-    """백엔드에 저장된 변환된 MIDI 파일 다운로드용"""
-    if not MIDI_PATH.exists():
-        raise HTTPException(status_code=404, detail="변환된 MIDI가 없습니다.")
-
-    try:
-        mp3_bytes = _midi_to_mp3_bytes(MIDI_PATH)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except Exception as exc:  # pretty_midi or mp3 export failure
-        raise HTTPException(status_code=500, detail="MIDI → MP3 변환 실패") from exc
-
-    mp3_filename = f"{MIDI_PATH.stem}.mp3"
-    return StreamingResponse(
-        io.BytesIO(mp3_bytes),
-        media_type="audio/mpeg",
-        headers={"Content-Disposition": f'attachment; filename="{mp3_filename}"'}
     )
 
 
@@ -223,7 +185,7 @@ async def upload_MIDI(voice: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        print("ERROR >> 업로드 파일을 mp3로 변환 실패:", e)
+        print(f"ERROR >> 업로드 파일을 mp3로 변환 실패: {e}")
         raise HTTPException(status_code=500, detail="업로드 파일을 mp3로 변환하지 못했습니다.")
 
     # ✅ MIDI 변환 실행
@@ -242,13 +204,22 @@ async def upload_MIDI(voice: UploadFile = File(...)):
     except HTTPException:
         raise
     except FileNotFoundError:
-        print("SoundFont 파일을 찾을 수 없어 변환에 실패했습니다.")
+        print("ERROR >> SoundFont 파일을 찾을 수 없어 변환에 실패했습니다.")
         raise HTTPException(status_code=500, detail="SoundFont 파일을 찾을 수 없습니다.")
     except ValueError as e:
-        print(f"변환 중 값 오류 발생: {e}")
+        print(f"ERROR >> 변환 중 값 오류 발생: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        print(f"ERROR >> 변환 중 오류 발생: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    return {"message": "MIDI 변환이 완료되었습니다."}
+    return {
+        "status": "success",
+        "message": "MIDI 변환이 완료되었습니다.",
+        "request_id": request_id,
+        "mp3Filename": mp3_filename,
+        "midiFilename": midi_filename,
+    }
 
 #----------------------Str!ng----------------------#
 LAST_RESULT_PATH = Path.cwd() / "services" / "string" / "last_result.json"
