@@ -2,23 +2,26 @@ import io
 import json
 import logging
 import os
+import sys
 import uuid
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import pickle
 import pretty_midi
 import soundfile as sf
 import numpy as np
+import torch
 from PIL import Image, UnidentifiedImageError
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
-
 # 🔹 추가 import (webm → mp3 변환용)
 from pydub import AudioSegment
 from dotenv import load_dotenv
+import uvicorn
 
 from services.inside.inside_return_featuremap import get_normalized_outputs
 from services.piano.audio_to_midi import talking_piano, midi_to_mp3_bytes
@@ -35,6 +38,7 @@ from services.string.generate import (
     StringArtResult,
     generate_string_art_from_array,
 )
+from services.facial.vae import VAE
 
 load_dotenv()
 
@@ -360,3 +364,83 @@ async def get_string_image():
         media_type="image/png",
         headers={"Content-Disposition": 'inline; filename="string_art.png"'}
     )
+
+#----------------------fac!al----------------------#
+FACIAL_DIR = Path(__file__).resolve().parent / "services" / "facial"
+VAE_MODEL_PATH = FACIAL_DIR / "vae_model_20.pth"
+LATENTS_PATH = FACIAL_DIR / "latents_selected_attrs.pkl"
+# Checkpoints saved with module name 'vae' need an alias to our package path
+sys.modules.setdefault("vae", sys.modules["services.facial.vae"])
+
+if not VAE_MODEL_PATH.exists():
+    raise FileNotFoundError(f"VAE model not found: {VAE_MODEL_PATH}")
+if not LATENTS_PATH.exists():
+    raise FileNotFoundError(f"Latents pickle not found: {LATENTS_PATH}")
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# -------------------------------
+# 1️⃣ VAE 모델 로드
+# -------------------------------
+torch.serialization.add_safe_globals([VAE])
+# CPU 환경에서도 GPU로 저장된 체크포인트를 읽을 수 있도록 map_location 지정
+map_location = torch.device(device)
+model = torch.load(VAE_MODEL_PATH, map_location=map_location, weights_only=False)
+model.to(device)
+model.eval()
+
+# -------------------------------
+# 2️⃣ pickle 로드
+# -------------------------------
+with LATENTS_PATH.open("rb") as f:
+    data = pickle.load(f)
+
+latents = data["latents"]        # (N, 128)
+attrs = data["attrs"]            # (N, 7)
+attr_names = data["attr_names"]  # ["Male","Smiling",...]
+
+# -------------------------------
+# 3️⃣ 속성별 latent 방향 계산
+# -------------------------------
+attr_dirs = []
+for i in range(attrs.shape[1]):
+    idx_pos = attrs[:, i] == 1
+    idx_neg = attrs[:, i] == 0
+    dir_vec = latents[idx_pos].mean(axis=0) - latents[idx_neg].mean(axis=0)
+    attr_dirs.append(dir_vec)
+attr_dirs = np.stack(attr_dirs)  # (7, 128)
+mean_latent = latents.mean(axis=0)  # 전체 평균 latent
+
+# -------------------------------
+# 4️⃣ 얼굴 이미지 생성 (GET)
+# -------------------------------
+@app.get("/api/facial/")
+def generate(
+    male: float = 0.0,
+    smiling: float = 0.0,
+    pale_skin: float = 0.0,
+    eyeglasses: float = 0.0,
+    mustache: float = 0.0,
+    wearing_lipstick: float = 0.0,
+    young: float = 0.0,
+):
+    slider_vals = np.array(
+        [male, smiling, pale_skin, eyeglasses, mustache, wearing_lipstick, young],
+        dtype=np.float32,
+    )
+
+    # latent 생성: mean_latent + slider_vals @ attr_dirs
+    z = mean_latent + np.dot(slider_vals, attr_dirs)
+    z = torch.tensor(z, dtype=torch.float32).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        out = model.decode(z)
+
+    out = out.view(3, 150, 150).clamp(0, 1)
+    img_np = (out.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+    pil = Image.fromarray(img_np)
+
+    buf = io.BytesIO()
+    pil.save(buf, format="PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
