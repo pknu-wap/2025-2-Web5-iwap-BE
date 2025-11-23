@@ -85,13 +85,13 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 마지막 결과 조회 API
-@app.get("/api/inside/")
+@app.get("/api/inside")
 def get_inside_layers():
     result = get_normalized_outputs()
     return result
 
 # 이미지 업로드 후 결과 계산 API
-@app.post("/api/inside/")
+@app.post("/api/inside")
 async def upload_inside_image(num_image: UploadFile = File(...)):
     contents = await num_image.read()
     pil_img = Image.open(io.BytesIO(contents))
@@ -146,7 +146,7 @@ def get_converted_midi(request_id: str = Query(..., description="요청 ID")):
 
 
 #----------------------녹음 파일 업로드 및 변환----------------------#
-@app.post("/api/piano/")
+@app.post("/api/piano")
 async def upload_MIDI(voice: UploadFile = File(...)):
     # ✅ webm, wav도 허용하도록 수정
     allowed_types = {"audio/mpeg", "audio/mp3", "audio/webm", "audio/wav"}
@@ -278,7 +278,7 @@ def _array_to_pil_image(array: np.ndarray, mode: str) -> Image.Image:
     data = (clipped * 255).astype(np.uint8)
     return Image.fromarray(data, "L")
 
-@app.get("/api/string/")
+@app.get("/api/string")
 async def get_string_result():
     """
     POST 요청으로 생성된 JSON 결과를 프론트로 반환
@@ -290,7 +290,7 @@ async def get_string_result():
     result = json.loads(LAST_RESULT_PATH.read_text(encoding="utf-8"))
     return JSONResponse(content=result)
     
-@app.post("/api/string/")
+@app.post("/api/string")
 async def upload_image(
     file: UploadFile = File(...),
     radius: int = Form(50),           # -r (랜덤으로 선택할 못 개수)
@@ -414,7 +414,7 @@ mean_latent = latents.mean(axis=0)  # 전체 평균 latent
 # -------------------------------
 # 4️⃣ 얼굴 이미지 생성 (GET)
 # -------------------------------
-@app.get("/api/facial/")
+@app.get("/api/facial")
 def generate(
     male: float = 0.0,
     smiling: float = 0.0,
