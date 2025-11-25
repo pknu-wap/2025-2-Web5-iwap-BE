@@ -39,23 +39,19 @@ from services.string.generate import (
     generate_string_art_from_array,
 )
 from services.facial.vae import VAE
+from services.Thisis4u.postcard_mail import (
+    SendPostcardRequest,
+    send_postcard_email,
+)
+from starlette.concurrency import run_in_threadpool
 
 load_dotenv()
 
 #----------------------inside----------------------#
-DEFAULT_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://2025-2-web5-iwap-fe-git-6-45bcd4-nayoung-kims-projects-01021d17.vercel.app",
-    "https://2025-2-web5-iwap-fe.vercel.app/piano",
-    "https://iwap.kro.kr",
-]
-
-
 def _load_allowed_origins() -> List[str]:
     raw = os.getenv("ALLOWED_ORIGINS")
     if not raw:
-        return DEFAULT_ALLOWED_ORIGINS
+        return []
 
     try:
         parsed = json.loads(raw)
@@ -364,6 +360,13 @@ async def get_string_image():
         media_type="image/png",
         headers={"Content-Disposition": 'inline; filename="string_art.png"'}
     )
+
+
+@app.post("/api/postcards/send")
+async def send_postcard(payload: SendPostcardRequest):
+    # send_email은 동기이므로 스레드풀로 실행
+    await run_in_threadpool(send_postcard_email, payload)
+    return {"status": "success", "message": "메일을 전송했습니다."}
 
 #----------------------fac!al----------------------#
 FACIAL_DIR = Path(__file__).resolve().parent / "services" / "facial"
