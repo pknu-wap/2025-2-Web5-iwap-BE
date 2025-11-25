@@ -1,15 +1,42 @@
 import json
 import logging
+import math
 import os
+import re
 import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List, Literal, Optional
+from html import escape
+from typing import List, Literal, Optional, Tuple
 
 from fastapi import HTTPException
-from jinja2 import BaseLoader, Environment, select_autoescape
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
+
+
+TAU = math.tau if hasattr(math, "tau") else 2 * math.pi
+SVG_WIDTH = 520
+SVG_HEIGHT = 320
+SVG_PADDING = 24
+SVG_STROKE_WIDTH = 2.2
+FOURIER_SAMPLES = int(os.getenv("THISIS4U_FOURIER_SAMPLES", "420"))
+COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}){1,2}$")
+Point = Tuple[float, float]
+
+
+def _sanitize_hex_color(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("컬러값은 문자열이어야 합니다.")
+    stripped = value.strip()
+    if COLOR_PATTERN.match(stripped):
+        return stripped.lower()
+    raise ValueError("HEX 컬러코드 형식(#RRGGBB)만 허용됩니다.")
+
+
+def _format_html_text(value: Optional[str], placeholder: str = "-") -> str:
+    if not value:
+        return placeholder
+    return escape(value).replace("\n", "<br />")
 
 
 def _count_coefficients(matrix: List[List["FourierCoefficient"]]) -> int:
@@ -25,6 +52,11 @@ class FourierCoefficient(BaseModel):
 class FrontPayload(BaseModel):
     background: str
     drawingFourier: List[List[FourierCoefficient]]
+
+    @field_validator("background")
+    @classmethod
+    def validate_background(cls, value: str):
+        return _sanitize_hex_color(value)
 
     @field_validator("drawingFourier")
     @classmethod
@@ -71,165 +103,110 @@ class SendPostcardRequest(BaseModel):
         return self
 
 
-_PREVIEW_ROW_LIMIT = 4
-_PREVIEW_COEFF_LIMIT = 5
-_SSR_ENV = Environment(
-    loader=BaseLoader(),
-    autoescape=select_autoescape(enabled_extensions=("html", "xml")),
-)
-_POSTCARD_TEMPLATE = _SSR_ENV.from_string(
-    """
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Postcard for {{ header.recipient }}</title>
-    <style>
-      :root { color-scheme: light; }
-      body {
-        margin: 0;
-        padding: 24px;
-        font-family: 'Pretendard', 'Segoe UI', Arial, sans-serif;
-        background: #f5f6fa;
-        color: #1f2933;
-      }
-      .wrapper {
-        max-width: 760px;
-        margin: 0 auto;
-        background: #ffffff;
-        border-radius: 16px;
-        box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
-        border: 1px solid #e5e7eb;
-        padding: 28px 32px;
-      }
-      h1 {
-        margin: 0 0 6px 0;
-        font-size: 22px;
-      }
-      .subtitle {
-        margin: 0 0 18px 0;
-        color: #6b7280;
-        font-size: 14px;
-      }
-      .faces {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 18px;
-      }
-      .face {
-        border: 1px solid #e5e7eb;
-        border-radius: 14px;
-        padding: 18px;
-        background: #f9fafb;
-      }
-      .face h3 {
-        margin: 0 0 6px 0;
-      }
-      .meta {
-        margin: 0 0 12px 0;
-        padding: 0;
-        list-style: none;
-        color: #4b5563;
-        font-size: 13px;
-      }
-      .meta li {
-        margin-bottom: 4px;
-      }
-      .color-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .color-chip__preview {
-        width: 16px;
-        height: 16px;
-        border-radius: 6px;
-        border: 1px solid rgba(0,0,0,0.08);
-      }
-      .rows {
-        border-top: 1px dashed #e5e7eb;
-        padding-top: 12px;
-        margin-top: 12px;
-      }
-      .row {
-        margin-bottom: 10px;
-      }
-      .row strong {
-        font-size: 13px;
-      }
-      .coeff-list {
-        margin: 6px 0;
-        padding-left: 18px;
-        color: #111827;
-      }
-      .etc {
-        color: #9ca3af;
-        font-size: 12px;
-      }
-      .divider {
-        height: 1px;
-        background: #e5e7eb;
-        margin: 20px 0;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="wrapper">
-      <h1>Postcard for {{ header.recipient }}</h1>
-      <p class="subtitle">
-        Template {{ header.template_label }} ({{ header.template_id }}) ·
-        Sent at {{ header.created_at }}
-      </p>
-      <div class="faces">
-        {% for face in faces %}
-          <section class="face">
-            <h3>{{ face.title }}</h3>
-            <p class="subtitle">{{ face.subtitle }}</p>
-            <ul class="meta">
-              <li>Strokes: {{ face.total_rows }} rows / {{ face.total_coefficients }} coefficients</li>
-              {% if face.background %}
-                <li class="color-chip">
-                  Background:
-                  <span class="color-chip__preview" style="background: {{ face.background }};"></span>
-                  <code>{{ face.background }}</code>
-                </li>
-              {% endif %}
-              {% if face.recipient %}
-                <li>Recipient: {{ face.recipient }}</li>
-              {% endif %}
-              {% if face.signature %}
-                <li>Signature: {{ face.signature }}</li>
-              {% endif %}
-              {% if face.message_preview %}
-                <li>Message: {{ face.message_preview }}</li>
-              {% endif %}
-            </ul>
-            <div class="rows">
-              {% for row in face.rows %}
-                <div class="row">
-                  <strong>Row {{ row.index }}</strong>
-                  <ul class="coeff-list">
-                    {% for coeff in row.coefficients %}
-                      <li>amp {{ coeff.amp }}, freq {{ coeff.freq }}, phase {{ coeff.phase }}</li>
-                    {% endfor %}
-                  </ul>
-                  {% if row.remaining_coefficients > 0 %}
-                    <p class="etc">… 외 {{ row.remaining_coefficients }} coefficients</p>
-                  {% endif %}
-                </div>
-              {% endfor %}
-              {% if face.remaining_rows > 0 %}
-                <p class="etc">Row {{ face.remaining_rows }}개 더 있음</p>
-              {% endif %}
-            </div>
-          </section>
-        {% endfor %}
-      </div>
-    </div>
-  </body>
-</html>
-"""
-)
+def _fourier_stroke_points(row: List["FourierCoefficient"], samples: int = FOURIER_SAMPLES) -> List[Point]:
+    if not row:
+        return []
+
+    points: List[Point] = []
+    for step in range(samples):
+        t = (step / samples) * TAU
+        x_sum = 0.0
+        y_sum = 0.0
+        for coeff in row:
+            angle = coeff.phase + coeff.freq * t
+            x_sum += coeff.amp * math.cos(angle)
+            y_sum += coeff.amp * math.sin(angle)
+        points.append((x_sum, y_sum))
+    return points
+
+
+def _normalize_points(
+    strokes: List[List[Point]],
+    width: int = SVG_WIDTH,
+    height: int = SVG_HEIGHT,
+    padding: int = SVG_PADDING,
+) -> List[List[Point]]:
+    if not strokes:
+        return []
+
+    flat_points = [pt for stroke in strokes for pt in stroke]
+    xs = [p[0] for p in flat_points]
+    ys = [p[1] for p in flat_points]
+
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+
+    span_x = max(max_x - min_x, 1e-6)
+    span_y = max(max_y - min_y, 1e-6)
+    avail_w = max(width - 2 * padding, 1.0)
+    avail_h = max(height - 2 * padding, 1.0)
+    scale = min(avail_w / span_x, avail_h / span_y)
+    scale = scale if math.isfinite(scale) and scale > 0 else 1.0
+
+    center_x = (min_x + max_x) / 2
+    center_y = (min_y + max_y) / 2
+
+    normalized: List[List[Point]] = []
+    for stroke in strokes:
+        normalized.append(
+            [
+                (
+                    (pt[0] - center_x) * scale + width / 2,
+                    (center_y - pt[1]) * scale + height / 2,
+                )
+                for pt in stroke
+            ]
+        )
+    return normalized
+
+
+def _render_placeholder_svg(background: str, stroke_color: str) -> str:
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{SVG_WIDTH}" height="{SVG_HEIGHT}" '
+        f'viewBox="0 0 {SVG_WIDTH} {SVG_HEIGHT}" role="img" aria-label="Empty Fourier preview">'
+        f'<rect width="100%" height="100%" rx="32" fill="{background}"/>'
+        f'<text x="50%" y="50%" text-anchor="middle" fill="{stroke_color}" font-size="18" '
+        f'font-family="Arial, sans-serif">No strokes</text>'
+        "</svg>"
+    )
+
+
+def _render_fourier_svg(
+    matrix: List[List["FourierCoefficient"]],
+    background: str,
+    stroke_color: str,
+) -> str:
+    strokes: List[List[Point]] = []
+    for row in matrix:
+        pts = _fourier_stroke_points(row)
+        if pts:
+            strokes.append(pts)
+
+    if not strokes:
+        return _render_placeholder_svg(background, stroke_color)
+
+    normalized = _normalize_points(strokes)
+    polylines = []
+    for stroke in normalized:
+        if len(stroke) < 2:
+            continue
+        points_attr = " ".join(f"{x:.2f},{y:.2f}" for x, y in stroke)
+        polylines.append(
+            f'<polyline fill="none" stroke="{stroke_color}" stroke-width="{SVG_STROKE_WIDTH}" '
+            'stroke-linecap="round" stroke-linejoin="round" points="'
+            f"{points_attr}\" />"
+        )
+
+    if not polylines:
+        return _render_placeholder_svg(background, stroke_color)
+
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{SVG_WIDTH}" height="{SVG_HEIGHT}" '
+        f'viewBox="0 0 {SVG_WIDTH} {SVG_HEIGHT}" role="img" aria-label="Fourier stroke preview">'
+        f'<rect width="100%" height="100%" rx="32" fill="{background}"/>'
+        + "".join(polylines)
+        + "</svg>"
+    )
 
 
 def _build_text_body(payload: SendPostcardRequest, recipient: str) -> str:
@@ -259,69 +236,61 @@ def _build_text_body(payload: SendPostcardRequest, recipient: str) -> str:
     return "\n".join(body_lines)
 
 
-def _preview_rows(matrix: List[List[FourierCoefficient]]):
-    preview_rows = []
-    for idx, row in enumerate(matrix[:_PREVIEW_ROW_LIMIT]):
-        preview_rows.append(
-            {
-                "index": idx + 1,
-                "coefficients": [
-                    coeff.model_dump() for coeff in row[:_PREVIEW_COEFF_LIMIT]
-                ],
-                "remaining_coefficients": max(len(row) - _PREVIEW_COEFF_LIMIT, 0),
-            }
-        )
-    remaining_rows = max(len(matrix) - _PREVIEW_ROW_LIMIT, 0)
-    return preview_rows, remaining_rows
-
-
-def _build_ssr_context(payload: SendPostcardRequest, recipient: str):
-    front_rows, front_remaining = _preview_rows(payload.front.drawingFourier)
-    back_rows, back_remaining = _preview_rows(payload.back.textFourier)
-
-    faces = [
-        {
-            "id": "front",
-            "title": "Front",
-            "subtitle": "카드 앞면",
-            "background": payload.front.background,
-            "rows": front_rows,
-            "remaining_rows": front_remaining,
-            "total_rows": len(payload.front.drawingFourier),
-            "total_coefficients": _count_coefficients(payload.front.drawingFourier),
-            "recipient": None,
-            "signature": None,
-            "message_preview": None,
-        },
-        {
-            "id": "back",
-            "title": "Back",
-            "subtitle": "카드 뒷면",
-            "background": None,
-            "rows": back_rows,
-            "remaining_rows": back_remaining,
-            "total_rows": len(payload.back.textFourier),
-            "total_coefficients": _count_coefficients(payload.back.textFourier),
-            "recipient": payload.back.recipient,
-            "signature": payload.back.signature,
-            "message_preview": payload.back.messagePreview,
-        },
-    ]
-
-    return {
-        "header": {
-            "recipient": recipient,
-            "template_label": payload.templateName,
-            "template_id": payload.templateId,
-            "created_at": payload.createdAt.isoformat(),
-        },
-        "faces": faces,
-    }
-
-
 def _build_html_body(payload: SendPostcardRequest, recipient: str) -> str:
-    context = _build_ssr_context(payload, recipient)
-    return _POSTCARD_TEMPLATE.render(context)
+    front_rows = len(payload.front.drawingFourier)
+    back_rows = len(payload.back.textFourier)
+    front_total = _count_coefficients(payload.front.drawingFourier)
+    back_total = _count_coefficients(payload.back.textFourier)
+
+    recipient_html = escape(recipient)
+    signature_html = _format_html_text(payload.back.signature)
+    message_html = _format_html_text(payload.back.messagePreview, placeholder="-")
+
+    front_svg = _render_fourier_svg(
+        payload.front.drawingFourier,
+        payload.front.background,
+        stroke_color="#fef9c3",
+    )
+    back_svg = _render_fourier_svg(
+        payload.back.textFourier,
+        background="#ffffff",
+        stroke_color="#111827",
+    )
+
+    return f"""
+<!doctype html>
+<html>
+  <body style="font-family: Arial, sans-serif; background: #f3f4f6; padding: 32px 16px; color: #111827;">
+    <div style="max-width: 720px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e5e7eb; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); padding: 28px;">
+      <h2 style="margin: 0 0 8px 0;">Postcard for {recipient_html}</h2>
+      <p style="margin: 0 0 20px 0; color: #6b7280;">Template · {payload.templateName} ({payload.templateId}) · {payload.createdAt.isoformat()}</p>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 16px;">
+        <div style="flex: 1 1 260px; border: 1px solid #e5e7eb; border-radius: 14px; padding: 16px; background: #f9fafb;">
+          <p style="margin: 0 0 8px 0; font-weight: 600;">Front</p>
+          <div style="margin-bottom: 12px; border-radius: 24px; overflow: hidden; border: 1px solid rgba(0,0,0,0.05);">{front_svg}</div>
+          <p style="margin: 0 0 4px 0; font-size: 13px; color: #374151;">Background: <span style="font-family: monospace;">{payload.front.background}</span></p>
+          <p style="margin: 0; font-size: 12px; color: #6b7280;">{front_rows} rows · {front_total} coefficients</p>
+        </div>
+
+        <div style="flex: 1 1 260px; border: 1px solid #e5e7eb; border-radius: 14px; padding: 16px; background: #f9fafb;">
+          <p style="margin: 0 0 8px 0; font-weight: 600;">Back</p>
+          <div style="margin-bottom: 12px; border-radius: 24px; overflow: hidden; border: 1px solid rgba(0,0,0,0.05);">{back_svg}</div>
+          <div style="font-size: 13px; color: #374151; line-height: 1.5;">
+            <p style="margin: 0;">Recipient: {escape(payload.back.recipient)}</p>
+            <p style="margin: 0;">Signature: {signature_html}</p>
+            <p style="margin: 8px 0 0 0;">Message:</p>
+            <p style="margin: 0; padding: 8px 10px; background: #fff; border: 1px dashed #d1d5db; border-radius: 8px;">{message_html}</p>
+          </div>
+          <p style="margin: 12px 0 0 0; font-size: 12px; color: #6b7280;">{back_rows} rows · {back_total} coefficients</p>
+        </div>
+      </div>
+
+      <p style="margin: 24px 0 0 0; font-size: 12px; color: #94a3b8;">자동 생성된 SSR 미리보기입니다.</p>
+    </div>
+  </body>
+</html>
+"""
 
 
 def _env_bool(key: str, default: bool = False) -> bool:
@@ -374,12 +343,7 @@ def send_postcard_email(payload: SendPostcardRequest):
     recipient_email = payload.back.recipient
     subject = f"[Postcard] {payload.templateName}"
     text_body = _build_text_body(payload, recipient_email)
-
-    try:
-        html_body = _build_html_body(payload, recipient_email)
-    except Exception as exc:
-        logging.exception("SSR 렌더링 실패: %s", exc)
-        raise HTTPException(status_code=500, detail="SSR 렌더링에 실패했습니다.") from exc
+    html_body = _build_html_body(payload, recipient_email)
 
     try:
         send_email(recipient_email, subject, html_body, text_body)
