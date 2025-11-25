@@ -1,4 +1,4 @@
-# !WAP: Interactive Web Art Project - FE
+# !WAP: Interactive Web Art Project - BE
 
 !WAP은 사용자와의 상호작용을 통해 완성되는 동적 디지털 아트 프로젝트입니다.
 
