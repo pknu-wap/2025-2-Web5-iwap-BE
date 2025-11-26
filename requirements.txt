@@ -32,7 +32,7 @@ typing_extensions==4.15.0
 uvicorn==0.35.0
 python-multipart==0.0.20
 python-dotenv==1.0.1
-moviepy==1.0.3
+moviepy==2.2.1
 imageio-ffmpeg==0.5.1
 
 #--------------- piano ---------------
