@@ -311,40 +311,47 @@ def _build_text_body(payload: SendPostcardRequest) -> str:
 def _build_html_body(payload: SendPostcardRequest) -> str:
     message_html = html.escape(payload.message).replace("\n", "<br>")
     sender_html = html.escape(payload.sender)
+    recipient_html = html.escape(payload.recipient_handle)
 
     return f"""
 <!doctype html>
 <html>
-  <body style="margin:0;padding:24px;background:#f7f8fa;font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif;color:#1f2933;">
-    <table role="presentation" style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:16px;padding:24px;border:1px solid #e5e7eb;box-shadow:0 10px 35px rgba(15,23,42,0.1);">
+  <body style="margin:0;padding:0;background:#0f172a;font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif;color:#0f172a;">
+    <table role="presentation" style="width:100%;border-collapse:collapse;padding:32px 0;">
       <tr>
-        <td>
-          <h2 style="margin:0 0 8px 0;color:#0f172a;">Postcard for {payload.recipient}</h2>
-          <p style="margin:0 0 16px 0;color:#475569;font-size:14px;">Template · {payload.template_name} ({payload.template_id}) · {payload.created_at.isoformat()}</p>
+        <td align="center" style="padding:24px;">
+          <table role="presentation" style="width:100%;max-width:680px;background:#ffffff;border-radius:28px;padding:40px;border:1px solid rgba(15,23,42,0.08);box-shadow:0 28px 60px rgba(15,23,42,0.18);">
+            <tr>
+              <td>
+                <p style="margin:0 0 4px 0;color:#94a3b8;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;">Th!s !s for u</p>
+                <h2 style="margin:0 0 12px 0;color:#0f172a;font-size:26px;">Postcard for {payload.recipient}</h2>
+                <p style="margin:0 0 24px 0;color:#475569;font-size:14px;">Template · {payload.template_name} ({payload.template_id}) · {payload.created_at.isoformat()}</p>
 
-          <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;">
-            <div style="flex:1;min-width:260px;">
-              <p style="margin:0 0 8px 0;font-weight:600;color:#0f172a;">Front</p>
-              <div style="border-radius:14px;overflow:hidden;border:1px solid rgba(15,23,42,0.08);background:{payload.front_background};padding:16px;display:flex;justify-content:center;align-items:center;min-height:240px;">
-                <img src="{payload.front_gif_data_uri}" alt="Front animation" style="max-width:100%;border-radius:12px;display:block;"/>
-              </div>
-            </div>
-            <div style="flex:1;min-width:260px;">
-              <p style="margin:0 0 8px 0;font-weight:600;color:#0f172a;">Back</p>
-              <div style="border-radius:14px;border:1px solid rgba(15,23,42,0.08);background:#fff;min-height:240px;padding:16px;display:flex;flex-direction:column;gap:12px;">
-                <p style="margin:0;font-size:14px;color:#475569;">To. <strong>{html.escape(payload.recipient_handle)}</strong></p>
-                <div style="border-radius:12px;overflow:hidden;border:1px dashed rgba(15,23,42,0.12);background:#f8fafc;padding:12px;display:flex;justify-content:center;align-items:center;">
-                  <img src="{payload.back_gif_data_uri}" alt="Back animation" style="max-width:100%;display:block;"/>
-                </div>
-                <div style="font-size:14px;line-height:1.6;color:#1e293b;border-radius:12px;background:#fdf2f8;padding:12px;min-height:80px;">
-                  {message_html}
-                </div>
-                <p style="margin:0;font-size:13px;color:#94a3b8;text-align:right;">from. <strong style="color:#0f172a;">{sender_html}</strong></p>
-              </div>
-            </div>
-          </div>
+                <div style="display:flex;flex-direction:column;gap:32px;">
+                  <section style="border-radius:22px;border:1px solid rgba(15,23,42,0.08);padding:24px;background:#f8fafc;">
+                    <p style="margin:0 0 12px 0;font-size:15px;font-weight:600;color:#0f172a;">Front</p>
+                    <div style="border-radius:18px;padding:24px;background:{payload.front_background};min-height:380px;display:flex;align-items:center;justify-content:center;">
+                      <img src="{payload.front_gif_url}" alt="Front animation" style="width:100%;max-height:360px;border-radius:16px;display:block;object-fit:contain;" loading="lazy" />
+                    </div>
+                  </section>
 
-          <p style="margin:0;font-size:12px;color:#94a3b8;">Sent via Th!s !s for u · {payload.created_at.isoformat()}</p>
+                  <section style="border-radius:22px;border:1px solid rgba(15,23,42,0.08);padding:24px;background:#ffffff;">
+                    <p style="margin:0 0 12px 0;font-size:15px;font-weight:600;color:#0f172a;">Back</p>
+                    <p style="margin:0 0 8px 0;font-size:14px;color:#475569;">To. <strong>{recipient_html}</strong></p>
+                    <div style="font-size:14px;line-height:1.7;color:#1e293b;border-radius:16px;background:#fdf2f8;padding:18px;min-height:120px;margin-bottom:18px;">
+                      {message_html}
+                    </div>
+                    <div style="border-radius:18px;border:1px dashed rgba(15,23,42,0.15);background:#f8fafc;padding:24px;display:flex;justify-content:center;align-items:center;min-height:360px;">
+                      <img src="{payload.back_gif_url}" alt="Back animation" style="width:100%;max-height:320px;object-fit:contain;border-radius:16px;display:block;" loading="lazy" />
+                    </div>
+                    <p style="margin:12px 0 0 0;font-size:13px;color:#94a3b8;text-align:right;">from. <strong style="color:#0f172a;">{sender_html}</strong></p>
+                  </section>
+                </div>
+
+                <p style="margin:28px 0 0 0;font-size:12px;color:#94a3b8;text-align:center;">Sent via Th!s !s for u · {payload.created_at.isoformat()}</p>
+              </td>
+            </tr>
+          </table>
         </td>
       </tr>
     </table>
