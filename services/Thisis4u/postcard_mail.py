@@ -127,7 +127,7 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
                 width, _ = clip.size
                 target_width = min(width or preset.width, preset.width)
                 if width and width > target_width:
-                    clip = clip.with_size(width=target_width)
+                    clip = clip.resized(width=target_width)
 
                 source_fps = clip.fps or TARGET_GIF_FPS
                 target_fps = max(1, min(int(source_fps), preset.fps))
