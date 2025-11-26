@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import smtplib
+import ssl
 import tempfile
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -261,10 +262,12 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: str = Non
             print("using starttls")
             server = smtplib.SMTP(smtp_server, smtp_port, timeout=15)
 
+        server.set_debuglevel(1)
+
         with server:
             if use_starttls and not use_ssl_tls:
                 print("starting tls")
-                server.starttls()
+                server.starttls(context=ssl.create_default_context())
             print("logging in")
             server.login(smtp_user, smtp_pass)
             print("sending mail")
