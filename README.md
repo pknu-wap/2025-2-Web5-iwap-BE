@@ -7,7 +7,15 @@
 <img width="720" height="405" alt="홈화면3" src="https://github.com/user-attachments/assets/c3ac9f24-2afa-400f-8435-6faff1445d24" />
 
 ## 🛠️ BE 기술 스택
-[![My Skills](https://skillicons.dev/icons?i=fastapi,aws,pytorch,python)](https://skillicons.dev)
+
+<div align="center">
+<img src="https://img.shields.io/badge/fastapi-009688?style=for-the-badge&logo=fastapi&logoColor=white">
+<img src="https://img.shields.io/badge/python-3776AB?style=for-the-badge&logo=python&logoColor=white">
+<img src="https://img.shields.io/badge/ffmpeg-007808?style=for-the-badge&logo=ffmpeg&logoColor=white">
+<br/>
+<img src="https://img.shields.io/badge/pytorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white">
+<img src="https://img.shields.io/badge/aws-FF9900?style=for-the-badge&logo=aws&logoColor=white">
+</div>
 
 ### <a href="https://github.com/pknu-wap/2025-2-Web5-iwap-BE/blob/main/docs/AWS_Serverless.md">AWS 비동기 서버리스 구조</a>
 
