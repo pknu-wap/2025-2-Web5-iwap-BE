@@ -72,8 +72,7 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
             str(output_path),
             fps=min(int(fps), TARGET_GIF_FPS),
             colors=MAX_COLORS,
-            program='ffmpeg',
-            logger=None
+            program='ffmpeg'
         )
 
         if not output_path.exists():
