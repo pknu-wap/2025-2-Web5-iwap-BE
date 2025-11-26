@@ -245,22 +245,32 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: str = Non
     msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
     msg["To"] = to_email
 
+    print(msg["From"])
+    print(msg["To"])
+    print(msg["Subject"])
+
     if text_body:
         msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
     try:
         if use_ssl_tls:
+            print("using ssl")
             server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=15)
         else:
+            print("using starttls")
             server = smtplib.SMTP(smtp_server, smtp_port, timeout=15)
 
         with server:
             if use_starttls and not use_ssl_tls:
+                print("starting tls")
                 server.starttls()
+            print("logging in")
             server.login(smtp_user, smtp_pass)
+            print("sending mail")
             server.sendmail(from_email, [to_email], msg.as_string())
     except Exception as exc:
+        print(f"SMTP 전송 실패: {exc}")
         raise HTTPException(status_code=502, detail=f"SMTP 전송 실패: {exc}") from exc
 
     return True
