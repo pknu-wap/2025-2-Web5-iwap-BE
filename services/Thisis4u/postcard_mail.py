@@ -68,11 +68,11 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
             clip = clip.resize(width=MAX_GIF_WIDTH)
 
         fps = clip.fps or TARGET_GIF_FPS
-        clip.write_git(
+        clip.write_gif(
             str(output_path),
             fps=min(int(fps), TARGET_GIF_FPS),
             colors=MAX_COLORS,
-            program='ffmpeg'
+            program="ffmpeg",
         )
 
         if not output_path.exists():
