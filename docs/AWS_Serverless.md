@@ -12,7 +12,7 @@
 
 ## 사용한 서비스
 
-<div>
+<div align="center">
 <table>
 <tr>
 <img width="80" height="80" alt="Arch_AWS-Lambda_64" src="https://github.com/user-attachments/assets/e588776b-d499-4ff1-b408-69d1f6230af2" />
