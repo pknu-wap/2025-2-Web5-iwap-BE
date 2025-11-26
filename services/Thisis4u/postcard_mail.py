@@ -13,12 +13,13 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import HTTPException
-from moviepy.editor import VideoFileClip  # type: ignore[import]
+from moviepy import VideoFileClip  # type: ignore[import]
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 logger = logging.getLogger(__name__)
 
+MAX_COLORS = 128
 MAX_VIDEO_BYTES = 15 * 1024 * 1024  # 15MB
 MAX_GIF_DURATION = 6  # seconds
 MAX_GIF_WIDTH = 480  # px
@@ -67,7 +68,13 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
             clip = clip.resize(width=MAX_GIF_WIDTH)
 
         fps = clip.fps or TARGET_GIF_FPS
-        clip.write_gif(str(output_path), fps=min(int(fps), TARGET_GIF_FPS))
+        clip.write_git(
+            str(output_path),
+            fps=min(int(fps), TARGET_GIF_FPS),
+            colors=MAX_COLORS,
+            program='ffmpeg',
+            logger=None
+        )
 
         if not output_path.exists():
             raise HTTPException(status_code=500, detail="GIF 파일을 생성하지 못했습니다.")
