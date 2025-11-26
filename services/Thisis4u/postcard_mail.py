@@ -312,46 +312,66 @@ def _build_html_body(payload: SendPostcardRequest) -> str:
     message_html = html.escape(payload.message).replace("\n", "<br>")
     sender_html = html.escape(payload.sender)
     recipient_html = html.escape(payload.recipient_handle)
+    date_str = payload.created_at.strftime("%Y / %m / %d")
 
     return f"""
 <!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#0f172a;font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif;color:#0f172a;">
-    <table role="presentation" style="width:100%;border-collapse:collapse;padding:32px 0;">
+    <table role="presentation" style="width:100%;border-collapse:collapse;padding:40px 0;">
       <tr>
-        <td align="center" style="padding:24px;">
-          <table role="presentation" style="width:100%;max-width:680px;background:#ffffff;border-radius:28px;padding:40px;border:1px solid rgba(15,23,42,0.08);box-shadow:0 28px 60px rgba(15,23,42,0.18);">
-            <tr>
-              <td>
-                <p style="margin:0 0 4px 0;color:#94a3b8;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;">Th!s !s for u</p>
-                <h2 style="margin:0 0 12px 0;color:#0f172a;font-size:26px;">Postcard for {payload.recipient}</h2>
-                <p style="margin:0 0 24px 0;color:#475569;font-size:14px;">Template · {payload.template_name} ({payload.template_id}) · {payload.created_at.isoformat()}</p>
+        <td align="center">
+          <div style="width:100%;max-width:640px;margin:0 auto;">
+            
+            <!-- FRONT CARD -->
+            <div style="background-color:{payload.front_background}; border-radius:4px; padding:20px; margin-bottom:40px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">
+                <img src="{payload.front_gif_url}" alt="Front" style="width:100%; height:auto; display:block; border-radius:2px; margin:0 auto;" />
+            </div>
 
-                <div style="display:flex;flex-direction:column;gap:32px;">
-                  <section style="border-radius:22px;border:1px solid rgba(15,23,42,0.08);padding:24px;background:#f8fafc;">
-                    <p style="margin:0 0 12px 0;font-size:15px;font-weight:600;color:#0f172a;">Front</p>
-                    <div style="border-radius:18px;padding:24px;background:{payload.front_background};min-height:380px;display:flex;align-items:center;justify-content:center;">
-                      <img src="{payload.front_gif_url}" alt="Front animation" style="width:100%;max-height:360px;border-radius:16px;display:block;object-fit:contain;" loading="lazy" />
-                    </div>
-                  </section>
-
-                  <section style="border-radius:22px;border:1px solid rgba(15,23,42,0.08);padding:24px;background:#ffffff;">
-                    <p style="margin:0 0 12px 0;font-size:15px;font-weight:600;color:#0f172a;">Back</p>
-                    <p style="margin:0 0 8px 0;font-size:14px;color:#475569;">To. <strong>{recipient_html}</strong></p>
-                    <div style="font-size:14px;line-height:1.7;color:#1e293b;border-radius:16px;background:#fdf2f8;padding:18px;min-height:120px;margin-bottom:18px;">
-                      {message_html}
-                    </div>
-                    <div style="border-radius:18px;border:1px dashed rgba(15,23,42,0.15);background:#f8fafc;padding:24px;display:flex;justify-content:center;align-items:center;min-height:360px;">
-                      <img src="{payload.back_gif_url}" alt="Back animation" style="width:100%;max-height:320px;object-fit:contain;border-radius:16px;display:block;" loading="lazy" />
-                    </div>
-                    <p style="margin:12px 0 0 0;font-size:13px;color:#94a3b8;text-align:right;">from. <strong style="color:#0f172a;">{sender_html}</strong></p>
-                  </section>
+            <!-- BACK CARD (POSTCARD STYLE) -->
+            <div style="background-color:#ffffff; border-radius:4px; padding:40px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">
+                <!-- Header -->
+                <div style="text-align:center; margin-bottom:30px;">
+                    <h2 style="margin:0; font-family:'Times New Roman', serif; font-size:24px; letter-spacing:4px; color:#333; font-weight:normal;">POSTCARD</h2>
                 </div>
 
-                <p style="margin:28px 0 0 0;font-size:12px;color:#94a3b8;text-align:center;">Sent via Th!s !s for u · {payload.created_at.isoformat()}</p>
-              </td>
-            </tr>
-          </table>
+                <table role="presentation" style="width:100%; border-collapse:collapse;">
+                    <tr>
+                        <!-- LEFT COLUMN (Message) -->
+                        <td style="width:50%; vertical-align:top; padding-right:24px; border-right:1px solid #e2e8f0;">
+                            <p style="margin:0 0 24px 0; font-size:18px; font-weight:bold; font-family:'Times New Roman', serif; font-style:italic; color:#1e293b;">
+                                To. <span style="font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif; font-style:normal;">{recipient_html}</span>
+                            </p>
+                            <div style="font-size:15px; line-height:1.8; color:#475569; white-space:pre-wrap; font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif;">{message_html}</div>
+                        </td>
+
+                        <!-- RIGHT COLUMN (Meta) -->
+                        <td style="width:50%; vertical-align:top; padding-left:24px;">
+                            <!-- Date -->
+                            <div style="text-align:right; margin-bottom:20px; font-size:13px; color:#94a3b8; font-family:'Times New Roman', serif;">
+                                DATE <span style="border-bottom:1px solid #cbd5e1; padding:0 8px; margin-left:4px; font-family:monospace;">{date_str}</span>
+                            </div>
+
+                            <!-- Stamp Area -->
+                            <div style="text-align:right; margin-bottom:60px;">
+                                <div style="display:inline-block; width:90px; height:100px; border:1px dashed #cbd5e1; padding:4px; background:#f8fafc;">
+                                    <img src="{payload.back_gif_url}" alt="Stamp" style="width:100%; height:100%; object-fit:contain;" />
+                                </div>
+                            </div>
+
+                            <!-- Sender -->
+                            <div style="text-align:right;">
+                                <p style="margin:0; font-size:18px; font-weight:bold; font-family:'Times New Roman', serif; font-style:italic; color:#1e293b;">
+                                    From. <span style="font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif; font-style:normal;">{sender_html}</span>
+                                </p>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+
+            <p style="margin-top:30px; text-align:center; color:#64748b; font-size:12px;">Sent via Th!s !s for u</p>
+          </div>
         </td>
       </tr>
     </table>
@@ -431,4 +451,3 @@ def send_postcard_email(payload: SendPostcardRequest):
     except Exception as exc:
         logger.exception("메일 전송 실패: %s", exc)
         raise HTTPException(status_code=502, detail="메일 전송에 실패했습니다.") from exc
-
