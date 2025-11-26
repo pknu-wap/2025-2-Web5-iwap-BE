@@ -253,8 +253,6 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: str = Non
         msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    print(msg.as_string())
-
     try:
         if use_ssl_tls:
             print("using ssl")
