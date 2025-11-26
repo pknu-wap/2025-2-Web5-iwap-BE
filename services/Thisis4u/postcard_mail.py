@@ -15,16 +15,16 @@ from typing import Literal
 
 from fastapi import HTTPException
 from moviepy import VideoFileClip  # type: ignore[import]
+from PIL import Image, ImageSequence
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 logger = logging.getLogger(__name__)
-
 MAX_COLORS = 128
 MAX_VIDEO_BYTES = 15 * 1024 * 1024  # 15MB
 MAX_GIF_DURATION = 6  # seconds
-MAX_GIF_WIDTH = 480  # px
-TARGET_GIF_FPS = 15
+MAX_GIF_WIDTH = 320  # px
+TARGET_GIF_FPS = 10
 MAX_MESSAGE_CHARS = 600
 CSS_COLOR_PATTERN = re.compile(r"^[#a-zA-Z0-9(),.\s%\-]+$")
 
@@ -44,6 +44,33 @@ def _video_bytes_to_data_uri(video_bytes: bytes) -> str:
     return f"data:image/gif;base64,{encoded}"
 
 
+def _optimize_gif_file(path: Path) -> None:
+    try:
+        with Image.open(path) as original:
+            frames = []
+            durations = []
+            for frame in ImageSequence.Iterator(original):
+                reduced = frame.convert("P", palette=Image.ADAPTIVE, colors=MAX_COLORS).copy()
+                frames.append(reduced)
+                durations.append(frame.info.get("duration", original.info.get("duration", 80)))
+
+            if not frames:
+                return
+
+            frames[0].save(
+                path,
+                format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=durations,
+                loop=original.info.get("loop", 0),
+                optimize=True,
+                disposal=2,
+            )
+    except Exception as exc:  # pragma: no cover - 최적화 실패는 치명적이지 않음
+        logger.warning("GIF 최적화 실패: %s", exc)
+
+
 def _convert_video_to_gif(video_bytes: bytes) -> bytes:
     if not video_bytes:
         raise HTTPException(status_code=400, detail="비디오 파일이 비어있습니다.")
@@ -59,7 +86,10 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
         output_path = work_dir / "clip.gif"
         input_path.write_bytes(video_bytes)
 
-        clip = VideoFileClip(str(input_path))
+        clip = VideoFileClip(
+            filename=str(input_path),
+            audio=False,
+            )
         duration = clip.duration or 0
         if duration and duration > MAX_GIF_DURATION:
             clip = clip.subclip(0, MAX_GIF_DURATION)
@@ -73,6 +103,7 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
             str(output_path),
             fps=min(int(fps), TARGET_GIF_FPS)
         )
+        _optimize_gif_file(output_path)
 
         if not output_path.exists():
             raise HTTPException(status_code=500, detail="GIF 파일을 생성하지 못했습니다.")
