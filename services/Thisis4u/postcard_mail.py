@@ -168,7 +168,7 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
 
                 duration = clip.duration or 0
                 if duration and duration > MAX_GIF_DURATION:
-                    clip = clip.subclip(0, MAX_GIF_DURATION)
+                    clip = clip.subclipped(0, MAX_GIF_DURATION)
 
                 width, _ = clip.size
                 target_width = min(width or preset.width, preset.width)
