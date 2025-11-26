@@ -1,141 +1,213 @@
-import json
+import base64
+import html
 import logging
 import os
+import re
+import shutil
 import smtplib
+import tempfile
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List, Literal, Optional
+from pathlib import Path
+from typing import Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from moviepy.editor import VideoFileClip  # type: ignore[import]
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
-def _count_coefficients(matrix: List[List["FourierCoefficient"]]) -> int:
-    return sum(len(row) for row in matrix)
+logger = logging.getLogger(__name__)
+
+MAX_VIDEO_BYTES = 15 * 1024 * 1024  # 15MB
+MAX_GIF_DURATION = 6  # seconds
+MAX_GIF_WIDTH = 480  # px
+TARGET_GIF_FPS = 15
+MAX_MESSAGE_CHARS = 600
+CSS_COLOR_PATTERN = re.compile(r"^[#a-zA-Z0-9(),.\s%\-]+$")
 
 
-class FourierCoefficient(BaseModel):
-    amp: float
-    freq: int
-    phase: float
+def _safe_background(value: str, fallback: str = "#111827") -> str:
+    if not value:
+        return fallback
+    cleaned = value.strip()
+    if len(cleaned) > 80:
+        cleaned = cleaned[:80]
+    return cleaned if CSS_COLOR_PATTERN.match(cleaned) else fallback
 
 
-class FrontPayload(BaseModel):
-    background: str
-    drawingFourier: List[List[FourierCoefficient]]
-
-    @field_validator("drawingFourier")
-    @classmethod
-    def validate_drawing(cls, value: List[List[FourierCoefficient]]):
-        if not value:
-            raise ValueError("drawingFourier는 최소 1개 이상이어야 합니다.")
-        return value
+def _video_bytes_to_data_uri(video_bytes: bytes) -> str:
+    gif_bytes = _convert_video_to_gif(video_bytes)
+    encoded = base64.b64encode(gif_bytes).decode("ascii")
+    return f"data:image/gif;base64,{encoded}"
 
 
-class BackPayload(BaseModel):
-    recipient: EmailStr
-    signature: Optional[str] = None
-    messagePreview: Optional[str] = None
-    textFourier: List[List[FourierCoefficient]]
+def _convert_video_to_gif(video_bytes: bytes) -> bytes:
+    if not video_bytes:
+        raise HTTPException(status_code=400, detail="비디오 파일이 비어있습니다.")
+    if len(video_bytes) > MAX_VIDEO_BYTES:
+        mb = MAX_VIDEO_BYTES // (1024 * 1024)
+        raise HTTPException(status_code=400, detail=f"비디오는 최대 {mb}MB까지 지원됩니다.")
 
-    @field_validator("textFourier")
-    @classmethod
-    def validate_text(cls, value: List[List[FourierCoefficient]]):
-        if not value:
-            raise ValueError("textFourier는 최소 1개 이상이어야 합니다.")
-        return value
+    work_dir = Path(tempfile.mkdtemp(prefix="postcard-"))
+    clip = None
 
-    @field_validator("signature", "messagePreview")
-    @classmethod
-    def limit_length(cls, value: Optional[str]):
-        if value and len(value) > 200:
-            raise ValueError("signature와 messagePreview는 200자 이하로 보내주세요.")
-        return value
+    try:
+        input_path = work_dir / "clip.mp4"
+        output_path = work_dir / "clip.gif"
+        input_path.write_bytes(video_bytes)
+
+        clip = VideoFileClip(str(input_path))
+        duration = clip.duration or 0
+        if duration and duration > MAX_GIF_DURATION:
+            clip = clip.subclip(0, MAX_GIF_DURATION)
+
+        width, _ = clip.size
+        if width and width > MAX_GIF_WIDTH:
+            clip = clip.resize(width=MAX_GIF_WIDTH)
+
+        fps = clip.fps or TARGET_GIF_FPS
+        clip.write_gif(str(output_path), fps=min(int(fps), TARGET_GIF_FPS))
+
+        if not output_path.exists():
+            raise HTTPException(status_code=500, detail="GIF 파일을 생성하지 못했습니다.")
+
+        return output_path.read_bytes()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("영상 GIF 변환 실패: %s", exc)
+        raise HTTPException(status_code=500, detail="GIF 변환 중 오류가 발생했습니다.") from exc
+    finally:
+        if clip:
+            clip.close()
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 class SendPostcardRequest(BaseModel):
-    templateId: Literal["this-is-for-u"]
-    templateName: Literal["Th!s !s for u"]
-    createdAt: datetime
-    front: FrontPayload
-    back: BackPayload
+    template_id: Literal["this-is-for-u"] = Field(alias="templateId")
+    template_name: Literal["Th!s !s for u"] = Field(alias="templateName")
+    created_at: datetime = Field(alias="createdAt")
+    front_background: str = Field(alias="frontBackground")
+    recipient: EmailStr
+    sender: str
+    message: str
+    front_gif_data_uri: str = Field(alias="frontGifDataUri")
+    back_gif_data_uri: str = Field(alias="backGifDataUri")
 
-    @model_validator(mode="after")
-    def validate_sizes(self):
-        front_total = _count_coefficients(self.front.drawingFourier)
-        back_total = _count_coefficients(self.back.textFourier)
-        if front_total + back_total > 20000:
-            raise ValueError("Fourier 계수는 총 20000개 이하로 보내주세요.")
-        return self
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    @field_validator("front_background")
+    @classmethod
+    def validate_background(cls, value: str) -> str:
+        return _safe_background(value)
+
+    @field_validator("sender")
+    @classmethod
+    def validate_sender(cls, value: str) -> str:
+        if not value:
+            raise ValueError("sender는 필수입니다.")
+        clean = value.strip()
+        return clean[:80]
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        if not value:
+            raise ValueError("message는 필수입니다.")
+        if len(value) > MAX_MESSAGE_CHARS:
+            raise ValueError(f"message는 {MAX_MESSAGE_CHARS}자 이하로 입력해주세요.")
+        return value
+
+    @classmethod
+    def from_form(
+        cls,
+        *,
+        template_id: str,
+        template_name: str,
+        created_at: datetime,
+        front_background: str,
+        recipient: str,
+        sender: str,
+        message: str,
+        front_video: bytes,
+        back_video: bytes,
+    ) -> "SendPostcardRequest":
+        front_uri = _video_bytes_to_data_uri(front_video)
+        back_uri = _video_bytes_to_data_uri(back_video)
+        return cls(
+            templateId=template_id,
+            templateName=template_name,
+            createdAt=created_at,
+            frontBackground=front_background,
+            recipient=recipient,
+            sender=sender,
+            message=message,
+            frontGifDataUri=front_uri,
+            backGifDataUri=back_uri,
+        )
+
+    @property
+    def recipient_handle(self) -> str:
+        return str(self.recipient).split("@", 1)[0]
+
+    def message_preview(self) -> str:
+        return self.message if len(self.message) <= 140 else f"{self.message[:137]}..."
 
 
-def _build_text_body(payload: SendPostcardRequest, recipient: str) -> str:
-    front_rows = len(payload.front.drawingFourier)
-    back_rows = len(payload.back.textFourier)
-    front_total = _count_coefficients(payload.front.drawingFourier)
-    back_total = _count_coefficients(payload.back.textFourier)
-
-    front_preview = payload.front.drawingFourier[0][:2] if payload.front.drawingFourier else []
-    back_preview = payload.back.textFourier[0][:2] if payload.back.textFourier else []
-
-    body_lines = [
-        f"Postcard for {recipient}",
-        f"Template: {payload.templateId} ({payload.templateName})",
-        f"Created at: {payload.createdAt.isoformat()}",
-        f"Recipient: {payload.back.recipient}",
-        f"Signature: {payload.back.signature or '-'}",
-        f"Message preview: {payload.back.messagePreview or '-'}",
-        f"Front background: {payload.front.background}",
-        f"Front strokes: {front_rows} rows / {front_total} coefficients",
-        f"Back strokes: {back_rows} rows / {back_total} coefficients",
-        "",
-        "Preview (first row, up to 2 coefficients each):",
-        f"Front[0]: {json.dumps([c.model_dump() for c in front_preview], ensure_ascii=False)}",
-        f"Back[0]: {json.dumps([c.model_dump() for c in back_preview], ensure_ascii=False)}",
-    ]
-    return "\n".join(body_lines)
+def _build_text_body(payload: SendPostcardRequest) -> str:
+    return "\n".join(
+        [
+            f"Postcard for {payload.recipient}",
+            f"Template: {payload.template_id} ({payload.template_name})",
+            f"Created at: {payload.created_at.isoformat()}",
+            f"Front background: {payload.front_background}",
+            f"To: {payload.recipient_handle}",
+            f"From: {payload.sender}",
+            "",
+            "Message:",
+            payload.message,
+        ]
+    )
 
 
-def _build_html_body(payload: SendPostcardRequest, recipient: str) -> str:
-    front_rows = len(payload.front.drawingFourier)
-    back_rows = len(payload.back.textFourier)
-    front_total = _count_coefficients(payload.front.drawingFourier)
-    back_total = _count_coefficients(payload.back.textFourier)
-
-    front_preview = payload.front.drawingFourier[0][:2] if payload.front.drawingFourier else []
-    back_preview = payload.back.textFourier[0][:2] if payload.back.textFourier else []
-
-    front_preview_json = json.dumps([c.model_dump() for c in front_preview], ensure_ascii=False)
-    back_preview_json = json.dumps([c.model_dump() for c in back_preview], ensure_ascii=False)
+def _build_html_body(payload: SendPostcardRequest) -> str:
+    message_html = html.escape(payload.message).replace("\n", "<br>")
+    sender_html = html.escape(payload.sender)
 
     return f"""
 <!doctype html>
 <html>
-  <body style="font-family: Arial, sans-serif; background: #f7f8fa; padding: 24px; color: #1f2933;">
-    <table role="presentation" style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.04); padding: 24px; border: 1px solid #e5e7eb;">
+  <body style="margin:0;padding:24px;background:#f7f8fa;font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif;color:#1f2933;">
+    <table role="presentation" style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:16px;padding:24px;border:1px solid #e5e7eb;box-shadow:0 10px 35px rgba(15,23,42,0.1);">
       <tr>
         <td>
-          <h2 style="margin: 0 0 12px 0; color: #111827;">Postcard for {recipient}</h2>
-          <p style="margin: 0 0 16px 0; color: #4b5563;">Template: {payload.templateName} ({payload.templateId})</p>
+          <h2 style="margin:0 0 8px 0;color:#0f172a;">Postcard for {payload.recipient}</h2>
+          <p style="margin:0 0 16px 0;color:#475569;font-size:14px;">Template · {payload.template_name} ({payload.template_id}) · {payload.created_at.isoformat()}</p>
 
-          <div style="padding: 16px; border: 1px solid #e5e7eb; border-radius: 10px; background: #f9fafb; margin-bottom: 16px;">
-            <p style="margin: 0 0 8px 0; font-weight: 600;">Front</p>
-            <p style="margin: 0 0 4px 0;">Background: <span style="font-family: monospace;">{payload.front.background}</span></p>
-            <p style="margin: 0 0 4px 0;">Strokes: {front_rows} rows / {front_total} coefficients</p>
-            <p style="margin: 0; font-size: 12px; color: #6b7280;">Preview: {front_preview_json}</p>
+          <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;">
+            <div style="flex:1;min-width:260px;">
+              <p style="margin:0 0 8px 0;font-weight:600;color:#0f172a;">Front</p>
+              <div style="border-radius:14px;overflow:hidden;border:1px solid rgba(15,23,42,0.08);background:{payload.front_background};padding:16px;display:flex;justify-content:center;align-items:center;min-height:240px;">
+                <img src="{payload.front_gif_data_uri}" alt="Front animation" style="max-width:100%;border-radius:12px;display:block;"/>
+              </div>
+            </div>
+            <div style="flex:1;min-width:260px;">
+              <p style="margin:0 0 8px 0;font-weight:600;color:#0f172a;">Back</p>
+              <div style="border-radius:14px;border:1px solid rgba(15,23,42,0.08);background:#fff;min-height:240px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+                <p style="margin:0;font-size:14px;color:#475569;">To. <strong>{html.escape(payload.recipient_handle)}</strong></p>
+                <div style="border-radius:12px;overflow:hidden;border:1px dashed rgba(15,23,42,0.12);background:#f8fafc;padding:12px;display:flex;justify-content:center;align-items:center;">
+                  <img src="{payload.back_gif_data_uri}" alt="Back animation" style="max-width:100%;display:block;"/>
+                </div>
+                <div style="font-size:14px;line-height:1.6;color:#1e293b;border-radius:12px;background:#fdf2f8;padding:12px;min-height:80px;">
+                  {message_html}
+                </div>
+                <p style="margin:0;font-size:13px;color:#94a3b8;text-align:right;">from. <strong style="color:#0f172a;">{sender_html}</strong></p>
+              </div>
+            </div>
           </div>
 
-          <div style="padding: 16px; border: 1px solid #e5e7eb; border-radius: 10px; background: #f9fafb; margin-bottom: 16px;">
-            <p style="margin: 0 0 8px 0; font-weight: 600;">Back</p>
-            <p style="margin: 0 0 4px 0;">Recipient: {payload.back.recipient}</p>
-            <p style="margin: 0 0 4px 0;">Signature: {payload.back.signature or '-'}</p>
-            <p style="margin: 0 0 4px 0;">Message preview: {payload.back.messagePreview or '-'}</p>
-            <p style="margin: 0 0 4px 0;">Strokes: {back_rows} rows / {back_total} coefficients</p>
-            <p style="margin: 0; font-size: 12px; color: #6b7280;">Preview: {back_preview_json}</p>
-          </div>
-
-          <p style="margin: 0; color: #6b7280; font-size: 12px;">Sent at {payload.createdAt.isoformat()}</p>
+          <p style="margin:0;font-size:12px;color:#94a3b8;">Sent via Th!s !s for u · {payload.created_at.isoformat()}</p>
         </td>
       </tr>
     </table>
@@ -191,16 +263,16 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: str = Non
 
 
 def send_postcard_email(payload: SendPostcardRequest):
-    recipient_email = payload.back.recipient
-    subject = f"[Postcard] {payload.templateName}"
-    text_body = _build_text_body(payload, recipient_email)
-    html_body = _build_html_body(payload, recipient_email)
+    subject = f"[Postcard] {payload.template_name}"
+    text_body = _build_text_body(payload)
+    html_body = _build_html_body(payload)
 
     try:
-        send_email(recipient_email, subject, html_body, text_body)
-        logging.info("Postcard mail sent to %s", recipient_email)
+        send_email(str(payload.recipient), subject, html_body, text_body)
+        logger.info("Postcard mail sent to %s", payload.recipient)
     except HTTPException:
         raise
     except Exception as exc:
-        logging.exception("메일 전송 실패: %s", exc)
+        logger.exception("메일 전송 실패: %s", exc)
         raise HTTPException(status_code=502, detail="메일 전송에 실패했습니다.") from exc
+
