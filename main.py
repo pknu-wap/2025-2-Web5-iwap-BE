@@ -5,6 +5,8 @@ import os
 import sys
 import uuid
 from dataclasses import asdict
+from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -23,6 +25,7 @@ from pydub import AudioSegment
 from dotenv import load_dotenv
 import uvicorn
 
+from pydantic import EmailStr
 from services.inside.inside_return_featuremap import get_normalized_outputs
 from services.piano.audio_to_midi import talking_piano, midi_to_mp3_bytes
 from services.piano.constants import (
@@ -362,9 +365,53 @@ async def get_string_image():
     )
 
 
+def _ensure_video_upload(upload: UploadFile, label: str) -> None:
+    if upload.content_type and upload.content_type.startswith("video/"):
+        return
+    raise HTTPException(status_code=400, detail=f"{label}은(는) 비디오 파일이어야 합니다.")
+
+
 @app.post("/api/postcards/send")
-async def send_postcard(payload: SendPostcardRequest):
-    # send_email은 동기이므로 스레드풀로 실행
+async def send_postcard(
+    templateId: str = Form(...),
+    templateName: str = Form(...),
+    createdAt: str = Form(...),
+    frontBackground: str = Form(...),
+    recipient: EmailStr = Form(...),
+    sender: str = Form(...),
+    message: str = Form(...),
+    frontMp4: UploadFile = File(...),
+    backMp4: UploadFile = File(...),
+):
+    _ensure_video_upload(frontMp4, "frontMp4")
+    _ensure_video_upload(backMp4, "backMp4")
+
+    created_raw = createdAt.strip()
+    if created_raw.endswith("Z"):
+        created_raw = created_raw.replace("Z", "+00:00")
+
+    try:
+        created_dt = datetime.fromisoformat(created_raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="createdAt는 ISO8601 형식의 값이어야 합니다.")
+
+    front_bytes = await frontMp4.read()
+    back_bytes = await backMp4.read()
+
+    builder = partial(
+        SendPostcardRequest.from_form,
+        template_id=templateId,
+        template_name=templateName,
+        created_at=created_dt,
+        front_background=frontBackground,
+        recipient=str(recipient),
+        sender=sender,
+        message=message,
+        front_video=front_bytes,
+        back_video=back_bytes,
+    )
+
+    payload = await run_in_threadpool(builder)
     await run_in_threadpool(send_postcard_email, payload)
     return {"status": "success", "message": "메일을 전송했습니다."}
 
