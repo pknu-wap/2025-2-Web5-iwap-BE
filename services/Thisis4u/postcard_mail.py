@@ -1,4 +1,3 @@
-import base64
 import html
 import logging
 import os
@@ -7,6 +6,7 @@ import shutil
 import smtplib
 import ssl
 import tempfile
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -14,6 +14,8 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Literal, Optional, Tuple
 
+import boto3  # type: ignore[import]
+from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import]
 from fastapi import HTTPException
 from moviepy import VideoFileClip  # type: ignore[import]
 from PIL import Image, ImageSequence
@@ -28,6 +30,10 @@ MAX_GIF_DURATION = 6  # seconds
 TARGET_GIF_FPS = 10
 MAX_MESSAGE_CHARS = 600
 CSS_COLOR_PATTERN = re.compile(r"^[#a-zA-Z0-9(),.\s%\-]+$")
+POSTCARD_S3_BUCKET_ENV = "POSTCARD_S3_BUCKET"
+POSTCARD_S3_REGION_ENV = "POSTCARD_S3_REGION"
+POSTCARD_S3_BASE_URL_ENV = "POSTCARD_S3_BASE_URL"
+POSTCARD_S3_ACL_ENV = "POSTCARD_S3_ACL"
 
 
 @dataclass(frozen=True)
@@ -55,10 +61,9 @@ def _safe_background(value: str, fallback: str = "#111827") -> str:
     return cleaned if CSS_COLOR_PATTERN.match(cleaned) else fallback
 
 
-def _video_bytes_to_data_uri(video_bytes: bytes) -> str:
+def _video_bytes_to_s3_url(video_bytes: bytes) -> str:
     gif_bytes = _convert_video_to_gif(video_bytes)
-    encoded = base64.b64encode(gif_bytes).decode("ascii")
-    return f"data:image/gif;base64,{encoded}"
+    return _upload_gif_to_s3(gif_bytes)
 
 
 def _optimize_gif_file(path: Path, preset: GifPreset) -> None:
@@ -99,6 +104,47 @@ def _optimize_gif_file(path: Path, preset: GifPreset) -> None:
             )
     except Exception as exc:  # pragma: no cover - 최적화 실패는 치명적이지 않음
         logger.warning("GIF 최적화 실패: %s", exc)
+
+
+def _upload_gif_to_s3(gif_bytes: bytes) -> str:
+    bucket = os.getenv(POSTCARD_S3_BUCKET_ENV)
+    if not bucket:
+        raise HTTPException(
+            status_code=500,
+            detail=f"{POSTCARD_S3_BUCKET_ENV} 환경변수를 설정해주세요.",
+        )
+
+    region = os.getenv(POSTCARD_S3_REGION_ENV)
+    base_url = os.getenv(POSTCARD_S3_BASE_URL_ENV)
+    acl = os.getenv(POSTCARD_S3_ACL_ENV)
+    key = f"results/thisis4u/{uuid.uuid4().hex}.gif"
+
+    client_kwargs = {"region_name": region} if region else {}
+    client = boto3.client("s3", **client_kwargs)
+
+    put_kwargs = {
+        "Bucket": bucket,
+        "Key": key,
+        "Body": gif_bytes,
+        "ContentType": "image/gif",
+        "CacheControl": "max-age=31536000, public",
+    }
+    if acl:
+        put_kwargs["ACL"] = acl
+
+    try:
+        client.put_object(**put_kwargs)
+    except (BotoCoreError, ClientError) as exc:
+        logger.exception("S3 업로드 실패: %s", exc)
+        raise HTTPException(status_code=502, detail=f"S3 업로드 실패: {exc}") from exc
+
+    if base_url:
+        return f"{base_url.rstrip('/')}/{key}"
+
+    if region and region != "us-east-1":
+        return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+
+    return f"https://{bucket}.s3.amazonaws.com/{key}"
 
 
 def _convert_video_to_gif(video_bytes: bytes) -> bytes:
@@ -183,8 +229,8 @@ class SendPostcardRequest(BaseModel):
     recipient: EmailStr
     sender: str
     message: str
-    front_gif_data_uri: str = Field(alias="frontGifDataUri")
-    back_gif_data_uri: str = Field(alias="backGifDataUri")
+    front_gif_url: str = Field(alias="frontGifUrl")
+    back_gif_url: str = Field(alias="backGifUrl")
 
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
@@ -224,8 +270,8 @@ class SendPostcardRequest(BaseModel):
         front_video: bytes,
         back_video: bytes,
     ) -> "SendPostcardRequest":
-        front_uri = _video_bytes_to_data_uri(front_video)
-        back_uri = _video_bytes_to_data_uri(back_video)
+        front_url = _video_bytes_to_s3_url(front_video)
+        back_url = _video_bytes_to_s3_url(back_video)
         return cls(
             templateId=template_id,
             templateName=template_name,
@@ -234,8 +280,8 @@ class SendPostcardRequest(BaseModel):
             recipient=recipient,
             sender=sender,
             message=message,
-            frontGifDataUri=front_uri,
-            backGifDataUri=back_uri,
+            frontGifUrl=front_url,
+            backGifUrl=back_url,
         )
 
     @property
