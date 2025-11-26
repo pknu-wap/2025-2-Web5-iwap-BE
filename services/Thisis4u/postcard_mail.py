@@ -7,11 +7,12 @@ import shutil
 import smtplib
 import ssl
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional, Tuple
 
 from fastapi import HTTPException
 from moviepy import VideoFileClip  # type: ignore[import]
@@ -20,14 +21,30 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 logger = logging.getLogger(__name__)
-MAX_COLORS = 128
+
+MAX_GIF_BYTES = 1_400_000  # raw GIF bytes before base64 (~1.8MB inline)
 MAX_VIDEO_BYTES = 15 * 1024 * 1024  # 15MB
 MAX_GIF_DURATION = 6  # seconds
-MAX_GIF_WIDTH = 320  # px
 TARGET_GIF_FPS = 10
 MAX_MESSAGE_CHARS = 600
 CSS_COLOR_PATTERN = re.compile(r"^[#a-zA-Z0-9(),.\s%\-]+$")
 
+
+@dataclass(frozen=True)
+class GifPreset:
+    width: int
+    fps: int
+    colors: int
+    frame_stride: int = 1
+
+
+GIF_PRESETS: Tuple[GifPreset, ...] = (
+    GifPreset(width=320, fps=10, colors=96),
+    GifPreset(width=260, fps=8, colors=72),
+    GifPreset(width=200, fps=6, colors=56),
+    GifPreset(width=160, fps=5, colors=40),
+    GifPreset(width=128, fps=4, colors=32, frame_stride=2),
+)
 
 def _safe_background(value: str, fallback: str = "#111827") -> str:
     if not value:
@@ -44,15 +61,28 @@ def _video_bytes_to_data_uri(video_bytes: bytes) -> str:
     return f"data:image/gif;base64,{encoded}"
 
 
-def _optimize_gif_file(path: Path) -> None:
+def _optimize_gif_file(path: Path, preset: GifPreset) -> None:
     try:
         with Image.open(path) as original:
             frames = []
             durations = []
-            for frame in ImageSequence.Iterator(original):
-                reduced = frame.convert("P", palette=Image.ADAPTIVE, colors=MAX_COLORS).copy()
+            accumulated_duration = 0
+            default_duration = original.info.get("duration", 80)
+
+            for index, frame in enumerate(ImageSequence.Iterator(original)):
+                frame_duration = frame.info.get("duration", default_duration)
+                accumulated_duration += frame_duration
+
+                if preset.frame_stride > 1 and index % preset.frame_stride:
+                    continue
+
+                reduced = frame.convert("P", palette=Image.ADAPTIVE, colors=preset.colors).copy()
                 frames.append(reduced)
-                durations.append(frame.info.get("duration", original.info.get("duration", 80)))
+                durations.append(accumulated_duration)
+                accumulated_duration = 0
+
+            if accumulated_duration and frames:
+                durations[-1] += accumulated_duration
 
             if not frames:
                 return
@@ -79,44 +109,69 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
         raise HTTPException(status_code=400, detail=f"비디오는 최대 {mb}MB까지 지원됩니다.")
 
     work_dir = Path(tempfile.mkdtemp(prefix="postcard-"))
-    clip = None
+    best_bytes: Optional[bytes] = None
 
     try:
         input_path = work_dir / "clip.mp4"
         output_path = work_dir / "clip.gif"
         input_path.write_bytes(video_bytes)
 
-        clip = VideoFileClip(
-            filename=str(input_path),
-            audio=False,
+        for preset in GIF_PRESETS:
+            with VideoFileClip(filename=str(input_path), audio=False) as base_clip:
+                clip = base_clip
+
+                duration = clip.duration or 0
+                if duration and duration > MAX_GIF_DURATION:
+                    clip = clip.subclip(0, MAX_GIF_DURATION)
+
+                width, _ = clip.size
+                target_width = min(width or preset.width, preset.width)
+                if width and width > target_width:
+                    clip = clip.with_size(width=target_width)
+
+                source_fps = clip.fps or TARGET_GIF_FPS
+                target_fps = max(1, min(int(source_fps), preset.fps))
+                clip = clip.with_fps(target_fps)
+
+                clip.write_gif(
+                    str(output_path),
+                    fps=target_fps,
+                )
+
+            _optimize_gif_file(output_path, preset)
+
+            if not output_path.exists():
+                raise HTTPException(status_code=500, detail="GIF 파일을 생성하지 못했습니다.")
+
+            gif_bytes = output_path.read_bytes()
+            size_kb = len(gif_bytes) / 1024
+            logger.info(
+                "GIF preset %sx%s colors=%s stride=%s -> %.1fKB",
+                preset.width,
+                preset.fps,
+                preset.colors,
+                preset.frame_stride,
+                size_kb,
             )
-        duration = clip.duration or 0
-        if duration and duration > MAX_GIF_DURATION:
-            clip = clip.subclip(0, MAX_GIF_DURATION)
 
-        width, _ = clip.size
-        if width and width > MAX_GIF_WIDTH:
-            clip = clip.resized(width=MAX_GIF_WIDTH, height=MAX_GIF_WIDTH)
+            if best_bytes is None or len(gif_bytes) < len(best_bytes):
+                best_bytes = gif_bytes
 
-        fps = clip.fps or TARGET_GIF_FPS
-        clip.write_gif(
-            str(output_path),
-            fps=min(int(fps), TARGET_GIF_FPS)
+            if len(gif_bytes) <= MAX_GIF_BYTES:
+                return gif_bytes
+
+        assert best_bytes is not None
+        logger.warning(
+            "최솟값 프리셋으로도 GIF가 %.1fMB입니다. 업로드 영상을 더 축소하세요.",
+            len(best_bytes) / (1024 * 1024),
         )
-        _optimize_gif_file(output_path)
-
-        if not output_path.exists():
-            raise HTTPException(status_code=500, detail="GIF 파일을 생성하지 못했습니다.")
-
-        return output_path.read_bytes()
+        return best_bytes
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("영상 GIF 변환 실패: %s", exc)
         raise HTTPException(status_code=500, detail=f"GIF 변환 중 오류가 발생했습니다: {exc}") from exc
     finally:
-        if clip:
-            clip.close()
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
