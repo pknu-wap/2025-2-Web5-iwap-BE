@@ -72,8 +72,7 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
             str(output_path),
             fps=min(int(fps), TARGET_GIF_FPS),
             colors=MAX_COLORS,
-            program='ffmpeg',
-            logger=None
+            program='ffmpeg'
         )
 
         if not output_path.exists():
@@ -84,7 +83,7 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
         raise
     except Exception as exc:
         logger.exception("영상 GIF 변환 실패: %s", exc)
-        raise HTTPException(status_code=500, detail="GIF 변환 중 오류가 발생했습니다.") from exc
+        raise HTTPException(status_code=500, detail=f"GIF 변환 중 오류가 발생했습니다: {exc}") from exc
     finally:
         if clip:
             clip.close()
