@@ -1,9 +1,0 @@
-{
-    "mp3_path" : "public/input.mp3",
-    "output_midi_path" : "public/output.mid",
-    "n_fft" : 2048,
-    "hop_length" : 512,
-    "velocity" : 100,
-    "threshold_ratio" : 0.1,
-    "note_duration" : 0.05
-}
