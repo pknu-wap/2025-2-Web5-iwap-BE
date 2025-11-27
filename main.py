@@ -8,7 +8,7 @@ from dataclasses import asdict
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pickle
 import pretty_midi
@@ -70,6 +70,7 @@ ALLOWED_ORIGINS = _load_allowed_origins()
 
 LOG_FILE = Path.cwd() / "image_processing.log"
 logging.basicConfig(filename=str(LOG_FILE), level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -365,51 +366,71 @@ async def get_string_image():
     )
 
 
-def _ensure_video_upload(upload: UploadFile, label: str) -> None:
-    if upload.content_type and upload.content_type.startswith("video/"):
-        return
+def _ensure_video_upload(upload: Optional[UploadFile], label: str) -> bool:
+    if upload is None:
+        logger.warning("%s 누락: 기본 GIF로 대체합니다.", label)
+        return False
+    content_type = (upload.content_type or "").lower()
+    if content_type.startswith("video/"):
+        return True
+    filename = (upload.filename or "").lower()
+    if filename.endswith(".webm"):
+        return True
+    if filename.endswith(".mp4"):
+        return True
     raise HTTPException(status_code=400, detail=f"{label}은(는) 비디오 파일이어야 합니다.")
 
 
-def _detect_video_format(upload: UploadFile) -> str:
-    if upload.content_type:
+def _detect_video_format(upload: Optional[UploadFile]) -> str:
+    if upload and upload.content_type:
         lowered = upload.content_type.lower()
         if "webm" in lowered:
             return "webm"
-    filename = (upload.filename or "").lower()
-    if filename.endswith(".webm"):
-        return "webm"
+    if upload:
+        filename = (upload.filename or "").lower()
+        if filename.endswith(".webm"):
+            return "webm"
     return "mp4"
+
+
+def _parse_created_at(raw_value: Optional[str]) -> Optional[datetime]:
+    if not raw_value:
+        return None
+    cleaned = raw_value.strip()
+    if not cleaned:
+        return None
+    if cleaned.endswith("Z"):
+        cleaned = cleaned[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        logger.warning("createdAt 파싱 실패: %s", cleaned)
+    return None
 
 
 @app.post("/api/postcards/send")
 async def send_postcard(
-    templateId: str = Form(...),
-    templateName: str = Form(...),
-    createdAt: str = Form(...),
-    frontBackground: str = Form(...),
-    recipient: EmailStr = Form(...),
-    sender: str = Form(...),
-    message: str = Form(...),
-    frontMp4: UploadFile = File(...),
-    backMp4: UploadFile = File(...),
+    templateId: Optional[str] = Form(None),
+    templateName: Optional[str] = Form(None),
+    createdAt: Optional[str] = Form(None),
+    frontBackground: Optional[str] = Form(None),
+    recipient: Optional[EmailStr] = Form(None),
+    sender: Optional[str] = Form(None),
+    message: Optional[str] = Form(None),
+    frontMp4: Optional[UploadFile] = File(None),
+    backMp4: Optional[UploadFile] = File(None),
 ):
-    _ensure_video_upload(frontMp4, "frontMp4")
-    _ensure_video_upload(backMp4, "backMp4")
-    front_format = _detect_video_format(frontMp4)
-    back_format = _detect_video_format(backMp4)
+    front_has_video = _ensure_video_upload(frontMp4, "frontMp4")
+    back_has_video = _ensure_video_upload(backMp4, "backMp4")
+    front_format = _detect_video_format(frontMp4) if front_has_video else None
+    back_format = _detect_video_format(backMp4) if back_has_video else None
 
-    created_raw = createdAt.strip()
-    if created_raw.endswith("Z"):
-        created_raw = created_raw.replace("Z", "+00:00")
+    created_dt = _parse_created_at(createdAt)
 
-    try:
-        created_dt = datetime.fromisoformat(created_raw)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="createdAt는 ISO8601 형식의 값이어야 합니다.")
-
-    front_bytes = await frontMp4.read()
-    back_bytes = await backMp4.read()
+    front_bytes = await frontMp4.read() if front_has_video else None
+    back_bytes = await backMp4.read() if back_has_video else None
+    front_bytes = front_bytes or None
+    back_bytes = back_bytes or None
 
     builder = partial(
         SendPostcardRequest.from_form,
@@ -417,7 +438,7 @@ async def send_postcard(
         template_name=templateName,
         created_at=created_dt,
         front_background=frontBackground,
-        recipient=str(recipient),
+        recipient=str(recipient) if recipient else None,
         sender=sender,
         message=message,
         front_video=front_bytes,
