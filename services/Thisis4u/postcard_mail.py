@@ -1,3 +1,4 @@
+import base64
 import html
 import logging
 import os
@@ -8,18 +9,18 @@ import ssl
 import tempfile
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Literal, Optional, Tuple
+from typing import Optional, Tuple
 
 import boto3  # type: ignore[import]
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import]
 from fastapi import HTTPException
 from moviepy import VideoFileClip  # type: ignore[import]
 from PIL import Image, ImageSequence
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, FieldValidationInfo, field_validator
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,16 @@ POSTCARD_S3_BUCKET_ENV = "POSTCARD_S3_BUCKET"
 POSTCARD_S3_REGION_ENV = "POSTCARD_S3_REGION"
 POSTCARD_S3_BASE_URL_ENV = "POSTCARD_S3_BASE_URL"
 POSTCARD_S3_ACL_ENV = "POSTCARD_S3_ACL"
+DEFAULT_TEMPLATE_ID = "this-is-for-u"
+DEFAULT_TEMPLATE_NAME = "Th!s !s for u"
+DEFAULT_FRONT_BACKGROUND = "#111827"
+DEFAULT_SENDER_NAME = "익명"
+DEFAULT_MESSAGE = "마음을 담아 보냅니다."
+DEFAULT_RECIPIENT_EMAIL = os.getenv("POSTCARD_DEFAULT_RECIPIENT", "no-reply@example.com")
+DEFAULT_GIF_BASE64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+DEFAULT_GIF_BYTES = base64.b64decode(DEFAULT_GIF_BASE64)
+DEFAULT_FRONT_GIF_BYTES = DEFAULT_GIF_BYTES
+DEFAULT_BACK_GIF_BYTES = DEFAULT_GIF_BYTES
 
 
 @dataclass(frozen=True)
@@ -223,59 +234,110 @@ def _convert_video_to_gif(video_bytes: bytes, video_format: str) -> bytes:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+def _gif_url_from_inputs(
+    video_bytes: Optional[bytes],
+    video_format: Optional[str],
+    fallback_gif_bytes: bytes,
+) -> str:
+    if video_bytes:
+        normalized_format = (video_format or "mp4").lower()
+        return _video_bytes_to_s3_url(video_bytes, normalized_format)
+    logger.warning("비디오 업로드가 없어 기본 GIF를 사용합니다.")
+    return _upload_gif_to_s3(fallback_gif_bytes)
+
+
+def _current_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+TEXT_DEFAULTS = {
+    "template_id": DEFAULT_TEMPLATE_ID,
+    "template_name": DEFAULT_TEMPLATE_NAME,
+    "sender": DEFAULT_SENDER_NAME,
+    "message": DEFAULT_MESSAGE,
+}
+
+
 class SendPostcardRequest(BaseModel):
-    template_id: Literal["this-is-for-u"] = Field(alias="templateId")
-    template_name: Literal["Th!s !s for u"] = Field(alias="templateName")
-    created_at: datetime = Field(alias="createdAt")
-    front_background: str = Field(alias="frontBackground")
-    recipient: EmailStr
-    sender: str
-    message: str
+    template_id: str = Field(default=DEFAULT_TEMPLATE_ID, alias="templateId")
+    template_name: str = Field(default=DEFAULT_TEMPLATE_NAME, alias="templateName")
+    created_at: datetime = Field(default_factory=_current_utc, alias="createdAt")
+    front_background: str = Field(default=DEFAULT_FRONT_BACKGROUND, alias="frontBackground")
+    recipient: EmailStr = Field(default=DEFAULT_RECIPIENT_EMAIL)
+    sender: str = Field(default=DEFAULT_SENDER_NAME)
+    message: str = Field(default=DEFAULT_MESSAGE)
     front_gif_url: str = Field(alias="frontGifUrl")
     back_gif_url: str = Field(alias="backGifUrl")
 
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
-    @field_validator("front_background")
+    @field_validator("template_id", "template_name", "sender", "message", mode="before")
     @classmethod
-    def validate_background(cls, value: str) -> str:
-        return _safe_background(value)
+    def normalize_text_fields(cls, value: Optional[str], info: FieldValidationInfo) -> str:
+        default_value = TEXT_DEFAULTS.get(info.field_name, "")
+        if value is None:
+            return default_value
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned:
+                return default_value
+            if info.field_name == "sender":
+                return cleaned[:80]
+            if info.field_name == "message":
+                return cleaned[:MAX_MESSAGE_CHARS] if len(cleaned) > MAX_MESSAGE_CHARS else cleaned
+            return cleaned
+        return default_value
 
-    @field_validator("sender")
+    @field_validator("front_background", mode="before")
     @classmethod
-    def validate_sender(cls, value: str) -> str:
-        if not value:
-            raise ValueError("sender는 필수입니다.")
-        clean = value.strip()
-        return clean[:80]
+    def validate_background(cls, value: Optional[str]) -> str:
+        as_text = value if isinstance(value, str) else ""
+        return _safe_background(as_text, DEFAULT_FRONT_BACKGROUND)
 
-    @field_validator("message")
+    @field_validator("recipient", mode="before")
     @classmethod
-    def validate_message(cls, value: str) -> str:
-        if not value:
-            raise ValueError("message는 필수입니다.")
-        if len(value) > MAX_MESSAGE_CHARS:
-            raise ValueError(f"message는 {MAX_MESSAGE_CHARS}자 이하로 입력해주세요.")
-        return value
+    def validate_recipient(cls, value: Optional[str]) -> str:
+        if value is None:
+            return DEFAULT_RECIPIENT_EMAIL
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or DEFAULT_RECIPIENT_EMAIL
+        return DEFAULT_RECIPIENT_EMAIL
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def validate_created_at(cls, value):
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                if cleaned.endswith("Z"):
+                    cleaned = cleaned[:-1] + "+00:00"
+                try:
+                    return datetime.fromisoformat(cleaned)
+                except ValueError:
+                    logger.warning("createdAt 파싱 실패: %s", cleaned)
+        return _current_utc()
 
     @classmethod
     def from_form(
         cls,
         *,
-        template_id: str,
-        template_name: str,
-        created_at: datetime,
-        front_background: str,
-        recipient: str,
-        sender: str,
-        message: str,
-        front_video: bytes,
-        back_video: bytes,
-        front_format: str,
-        back_format: str,
+        template_id: Optional[str],
+        template_name: Optional[str],
+        created_at: Optional[datetime],
+        front_background: Optional[str],
+        recipient: Optional[str],
+        sender: Optional[str],
+        message: Optional[str],
+        front_video: Optional[bytes],
+        back_video: Optional[bytes],
+        front_format: Optional[str],
+        back_format: Optional[str],
     ) -> "SendPostcardRequest":
-        front_url = _video_bytes_to_s3_url(front_video, front_format)
-        back_url = _video_bytes_to_s3_url(back_video, back_format)
+        front_url = _gif_url_from_inputs(front_video, front_format, DEFAULT_FRONT_GIF_BYTES)
+        back_url = _gif_url_from_inputs(back_video, back_format, DEFAULT_BACK_GIF_BYTES)
         return cls(
             templateId=template_id,
             templateName=template_name,
