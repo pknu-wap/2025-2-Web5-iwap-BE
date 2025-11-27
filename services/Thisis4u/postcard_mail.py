@@ -210,22 +210,10 @@ def _build_html_body() -> str:
           <h2 style="margin:0 0 24px 0;font-size:26px;">This is for you</h2>
 
           <div style="display:flex;flex-direction:column;gap:28px;">
-            <div>
-              <p style="margin:0 0 8px 0;font-weight:600;">Front Card</p>
-              <img src="cid:front-card-static" alt="Front card" style="width:100%;border-radius:16px;display:block;"/>
-            </div>
-            <div>
-              <p style="margin:0 0 8px 0;font-weight:600;">Back Card</p>
-              <img src="cid:back-card-static" alt="Back card" style="width:100%;border-radius:16px;display:block;"/>
-            </div>
-            <div>
-              <p style="margin:0 0 8px 0;font-weight:600;">Front Animation</p>
-              <img src="cid:front-card-gif" alt="Front animation" style="width:100%;border-radius:16px;display:block;"/>
-            </div>
-            <div>
-              <p style="margin:0 0 8px 0;font-weight:600;">Back Animation</p>
-              <img src="cid:back-card-gif" alt="Back animation" style="width:100%;border-radius:16px;display:block;"/>
-            </div>
+            <img src="cid:front-card-static" alt="Front card" style="width:100%;border-radius:16px;display:block;"/>
+            <img src="cid:back-card-static" alt="Back card" style="width:100%;border-radius:16px;display:block;"/>
+            <img src="cid:front-card-gif" alt="Front animation" style="width:100%;border-radius:16px;display:block;"/>
+            <img src="cid:back-card-gif" alt="Back animation" style="width:100%;border-radius:16px;display:block;"/>
           </div>
         </td>
       </tr>
