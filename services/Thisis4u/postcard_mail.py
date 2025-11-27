@@ -1,50 +1,30 @@
-import base64
 import html
+import io
 import logging
 import os
-import re
-import shutil
 import smtplib
 import ssl
 import tempfile
-import uuid
+import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Optional, Tuple
 
-import boto3  # type: ignore[import]
-from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import]
 from fastapi import HTTPException
 from moviepy import VideoFileClip  # type: ignore[import]
 from PIL import Image, ImageSequence
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, FieldValidationInfo, field_validator
+from pydantic import BaseModel, EmailStr, Field
 
 
 logger = logging.getLogger(__name__)
 
-MAX_GIF_BYTES = 1_400_000  # raw GIF bytes before base64 (~1.8MB inline)
 MAX_VIDEO_BYTES = 15 * 1024 * 1024  # 15MB
 MAX_GIF_DURATION = 6  # seconds
 TARGET_GIF_FPS = 10
-MAX_MESSAGE_CHARS = 600
-CSS_COLOR_PATTERN = re.compile(r"^[#a-zA-Z0-9(),.\s%\-]+$")
-POSTCARD_S3_BUCKET_ENV = "POSTCARD_S3_BUCKET"
-POSTCARD_S3_REGION_ENV = "POSTCARD_S3_REGION"
-POSTCARD_S3_BASE_URL_ENV = "POSTCARD_S3_BASE_URL"
-POSTCARD_S3_ACL_ENV = "POSTCARD_S3_ACL"
-DEFAULT_TEMPLATE_ID = "this-is-for-u"
-DEFAULT_TEMPLATE_NAME = "Th!s !s for u"
-DEFAULT_FRONT_BACKGROUND = "#111827"
-DEFAULT_SENDER_NAME = "!WAP"
-DEFAULT_MESSAGE = "마음을 담아 보냅니다."
-DEFAULT_RECIPIENT_EMAIL = os.getenv("POSTCARD_DEFAULT_RECIPIENT", "no-reply@example.com")
-DEFAULT_GIF_BASE64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
-DEFAULT_GIF_BYTES = base64.b64decode(DEFAULT_GIF_BASE64)
-DEFAULT_FRONT_GIF_BYTES = DEFAULT_GIF_BYTES
-DEFAULT_BACK_GIF_BYTES = DEFAULT_GIF_BYTES
+MAX_IMAGE_WIDTH = 1600
 
 
 @dataclass(frozen=True)
@@ -56,25 +36,12 @@ class GifPreset:
 
 
 GIF_PRESETS: Tuple[GifPreset, ...] = (
-    GifPreset(width=320, fps=10, colors=96),
-    GifPreset(width=260, fps=8, colors=72),
-    GifPreset(width=200, fps=6, colors=56),
-    GifPreset(width=160, fps=5, colors=40),
-    GifPreset(width=128, fps=4, colors=32, frame_stride=2),
+    GifPreset(width=360, fps=10, colors=96),
+    GifPreset(width=300, fps=8, colors=72),
+    GifPreset(width=240, fps=6, colors=56),
+    GifPreset(width=180, fps=5, colors=40),
+    GifPreset(width=140, fps=4, colors=32, frame_stride=2),
 )
-
-def _safe_background(value: str, fallback: str = "#111827") -> str:
-    if not value:
-        return fallback
-    cleaned = value.strip()
-    if len(cleaned) > 80:
-        cleaned = cleaned[:80]
-    return cleaned if CSS_COLOR_PATTERN.match(cleaned) else fallback
-
-
-def _video_bytes_to_s3_url(video_bytes: bytes, video_format: str) -> str:
-    gif_bytes = _convert_video_to_gif(video_bytes, video_format)
-    return _upload_gif_to_s3(gif_bytes)
 
 
 def _optimize_gif_file(path: Path, preset: GifPreset) -> None:
@@ -82,23 +49,23 @@ def _optimize_gif_file(path: Path, preset: GifPreset) -> None:
         with Image.open(path) as original:
             frames = []
             durations = []
-            accumulated_duration = 0
             default_duration = original.info.get("duration", 80)
+            carry = 0
 
             for index, frame in enumerate(ImageSequence.Iterator(original)):
                 frame_duration = frame.info.get("duration", default_duration)
-                accumulated_duration += frame_duration
+                carry += frame_duration
 
                 if preset.frame_stride > 1 and index % preset.frame_stride:
                     continue
 
                 reduced = frame.convert("P", palette=Image.ADAPTIVE, colors=preset.colors).copy()
                 frames.append(reduced)
-                durations.append(accumulated_duration)
-                accumulated_duration = 0
+                durations.append(carry)
+                carry = 0
 
-            if accumulated_duration and frames:
-                durations[-1] += accumulated_duration
+            if carry and frames:
+                durations[-1] += carry
 
             if not frames:
                 return
@@ -113,49 +80,25 @@ def _optimize_gif_file(path: Path, preset: GifPreset) -> None:
                 optimize=True,
                 disposal=2,
             )
-    except Exception as exc:  # pragma: no cover - 최적화 실패는 치명적이지 않음
+    except Exception as exc:  # pragma: no cover
         logger.warning("GIF 최적화 실패: %s", exc)
 
 
-def _upload_gif_to_s3(gif_bytes: bytes) -> str:
-    bucket = os.getenv(POSTCARD_S3_BUCKET_ENV)
-    if not bucket:
-        raise HTTPException(
-            status_code=500,
-            detail=f"{POSTCARD_S3_BUCKET_ENV} 환경변수를 설정해주세요.",
-        )
-
-    region = os.getenv(POSTCARD_S3_REGION_ENV)
-    base_url = os.getenv(POSTCARD_S3_BASE_URL_ENV)
-    acl = os.getenv(POSTCARD_S3_ACL_ENV)
-    key = f"results/thisis4u/{uuid.uuid4().hex}.gif"
-
-    client_kwargs = {"region_name": region} if region else {}
-    client = boto3.client("s3", **client_kwargs)
-
-    put_kwargs = {
-        "Bucket": bucket,
-        "Key": key,
-        "Body": gif_bytes,
-        "ContentType": "image/gif",
-        "CacheControl": "max-age=31536000, public",
-    }
-    if acl:
-        put_kwargs["ACL"] = acl
-
+def _normalize_image(image_bytes: bytes) -> bytes:
     try:
-        client.put_object(**put_kwargs)
-    except (BotoCoreError, ClientError) as exc:
-        logger.exception("S3 업로드 실패: %s", exc)
-        raise HTTPException(status_code=502, detail=f"S3 업로드 실패: {exc}") from exc
+        with Image.open(io.BytesIO(image_bytes)) as raw:
+            image = raw.convert("RGB")
+            if image.width > MAX_IMAGE_WIDTH:
+                ratio = MAX_IMAGE_WIDTH / image.width
+                resized_height = max(1, int(image.height * ratio))
+                image = image.resize((MAX_IMAGE_WIDTH, resized_height), Image.LANCZOS)
 
-    if base_url:
-        return f"{base_url.rstrip('/')}/{key}"
-
-    if region and region != "us-east-1":
-        return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-
-    return f"https://{bucket}.s3.amazonaws.com/{key}"
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", optimize=True)
+            return buffer.getvalue()
+    except Exception as exc:
+        logger.exception("이미지 처리 실패: %s", exc)
+        raise HTTPException(status_code=400, detail="이미지 파일을 변환하지 못했습니다.") from exc
 
 
 def _convert_video_to_gif(video_bytes: bytes, video_format: str) -> bytes:
@@ -167,8 +110,7 @@ def _convert_video_to_gif(video_bytes: bytes, video_format: str) -> bytes:
 
     work_dir = Path(tempfile.mkdtemp(prefix="postcard-"))
     best_bytes: Optional[bytes] = None
-    normalized_format = video_format.lower()
-    suffix = ".webm" if normalized_format == "webm" else ".mp4"
+    suffix = ".webm" if video_format.lower() == "webm" else ".mp4"
 
     try:
         input_path = work_dir / f"clip{suffix}"
@@ -188,14 +130,10 @@ def _convert_video_to_gif(video_bytes: bytes, video_format: str) -> bytes:
                 if width and width > target_width:
                     clip = clip.resized(width=target_width)
 
-                source_fps = clip.fps or TARGET_GIF_FPS
-                target_fps = max(1, min(int(source_fps), preset.fps))
-                clip = clip.with_fps(target_fps)
+                fps = clip.fps or TARGET_GIF_FPS
+                clip = clip.with_fps(min(int(fps), preset.fps))
 
-                clip.write_gif(
-                    str(output_path),
-                    fps=target_fps,
-                )
+                clip.write_gif(str(output_path), fps=clip.fps)
 
             _optimize_gif_file(output_path, preset)
 
@@ -203,27 +141,12 @@ def _convert_video_to_gif(video_bytes: bytes, video_format: str) -> bytes:
                 raise HTTPException(status_code=500, detail="GIF 파일을 생성하지 못했습니다.")
 
             gif_bytes = output_path.read_bytes()
-            size_kb = len(gif_bytes) / 1024
-            logger.info(
-                "GIF preset %sx%s colors=%s stride=%s -> %.1fKB",
-                preset.width,
-                preset.fps,
-                preset.colors,
-                preset.frame_stride,
-                size_kb,
-            )
-
             if best_bytes is None or len(gif_bytes) < len(best_bytes):
                 best_bytes = gif_bytes
-
-            if len(gif_bytes) <= MAX_GIF_BYTES:
+            if len(gif_bytes) <= MAX_VIDEO_BYTES:
                 return gif_bytes
 
         assert best_bytes is not None
-        logger.warning(
-            "최솟값 프리셋으로도 GIF가 %.1fMB입니다. 업로드 영상을 더 축소하세요.",
-            len(best_bytes) / (1024 * 1024),
-        )
         return best_bytes
     except HTTPException:
         raise
@@ -234,209 +157,75 @@ def _convert_video_to_gif(video_bytes: bytes, video_format: str) -> bytes:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def _gif_url_from_inputs(
-    video_bytes: Optional[bytes],
-    video_format: Optional[str],
-    fallback_gif_bytes: bytes,
-) -> str:
-    if video_bytes:
-        normalized_format = (video_format or "mp4").lower()
-        return _video_bytes_to_s3_url(video_bytes, normalized_format)
-    logger.warning("비디오 업로드가 없어 기본 GIF를 사용합니다.")
-    return _upload_gif_to_s3(fallback_gif_bytes)
-
-
-def _current_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-TEXT_DEFAULTS = {
-    "template_id": DEFAULT_TEMPLATE_ID,
-    "template_name": DEFAULT_TEMPLATE_NAME,
-    "sender": DEFAULT_SENDER_NAME,
-    "message": DEFAULT_MESSAGE,
-}
-
-
-class SendPostcardRequest(BaseModel):
-    template_id: str = Field(default=DEFAULT_TEMPLATE_ID, alias="templateId")
-    template_name: str = Field(default=DEFAULT_TEMPLATE_NAME, alias="templateName")
-    created_at: datetime = Field(default_factory=_current_utc, alias="createdAt")
-    front_background: str = Field(default=DEFAULT_FRONT_BACKGROUND, alias="frontBackground")
-    recipient: EmailStr = Field(default=DEFAULT_RECIPIENT_EMAIL)
-    sender: str = Field(default=DEFAULT_SENDER_NAME)
-    message: str = Field(default=DEFAULT_MESSAGE)
-    front_gif_url: str = Field(alias="frontGifUrl")
-    back_gif_url: str = Field(alias="backGifUrl")
-
-    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
-
-    @field_validator("template_id", "template_name", "sender", "message", mode="before")
-    @classmethod
-    def normalize_text_fields(cls, value: Optional[str], info: FieldValidationInfo) -> str:
-        default_value = TEXT_DEFAULTS.get(info.field_name, "")
-        if value is None:
-            return default_value
-        if isinstance(value, str):
-            cleaned = value.strip()
-            if not cleaned:
-                return default_value
-            if info.field_name == "sender":
-                return cleaned[:80]
-            if info.field_name == "message":
-                return cleaned[:MAX_MESSAGE_CHARS] if len(cleaned) > MAX_MESSAGE_CHARS else cleaned
-            return cleaned
-        return default_value
-
-    @field_validator("front_background", mode="before")
-    @classmethod
-    def validate_background(cls, value: Optional[str]) -> str:
-        as_text = value if isinstance(value, str) else ""
-        return _safe_background(as_text, DEFAULT_FRONT_BACKGROUND)
-
-    @field_validator("recipient", mode="before")
-    @classmethod
-    def validate_recipient(cls, value: Optional[str]) -> str:
-        if value is None:
-            return DEFAULT_RECIPIENT_EMAIL
-        if isinstance(value, str):
-            cleaned = value.strip()
-            return cleaned or DEFAULT_RECIPIENT_EMAIL
-        return DEFAULT_RECIPIENT_EMAIL
-
-    @field_validator("created_at", mode="before")
-    @classmethod
-    def validate_created_at(cls, value):
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            cleaned = value.strip()
-            if cleaned:
-                if cleaned.endswith("Z"):
-                    cleaned = cleaned[:-1] + "+00:00"
-                try:
-                    return datetime.fromisoformat(cleaned)
-                except ValueError:
-                    logger.warning("createdAt 파싱 실패: %s", cleaned)
-        return _current_utc()
+class PostcardEmailPayload(BaseModel):
+    recipient: EmailStr = Field(...)
+    front_card_png: bytes
+    back_card_png: bytes
+    front_gif: bytes
+    back_gif: bytes
 
     @classmethod
-    def from_form(
+    def build(
         cls,
         *,
-        template_id: Optional[str],
-        template_name: Optional[str],
-        created_at: Optional[datetime],
-        front_background: Optional[str],
-        recipient: Optional[str],
-        sender: Optional[str],
-        message: Optional[str],
-        front_video: Optional[bytes],
-        back_video: Optional[bytes],
-        front_format: Optional[str],
-        back_format: Optional[str],
-    ) -> "SendPostcardRequest":
-        front_url = _gif_url_from_inputs(front_video, front_format, DEFAULT_FRONT_GIF_BYTES)
-        back_url = _gif_url_from_inputs(back_video, back_format, DEFAULT_BACK_GIF_BYTES)
+        recipient: str,
+        front_card_image: bytes,
+        back_card_image: bytes,
+        front_video_bytes: bytes,
+        back_video_bytes: bytes,
+        front_video_format: str,
+        back_video_format: str,
+    ) -> "PostcardEmailPayload":
+        front_png = _normalize_image(front_card_image)
+        back_png = _normalize_image(back_card_image)
+        front_gif = _convert_video_to_gif(front_video_bytes, front_video_format)
+        back_gif = _convert_video_to_gif(back_video_bytes, back_video_format)
         return cls(
-            templateId=template_id,
-            templateName=template_name,
-            createdAt=created_at,
-            frontBackground=front_background,
             recipient=recipient,
-            sender=sender,
-            message=message,
-            frontGifUrl=front_url,
-            backGifUrl=back_url,
+            front_card_png=front_png,
+            back_card_png=back_png,
+            front_gif=front_gif,
+            back_gif=back_gif,
         )
 
-    @property
-    def recipient_handle(self) -> str:
-        return str(self.recipient).split("@", 1)[0]
 
-    def message_preview(self) -> str:
-        return self.message if len(self.message) <= 140 else f"{self.message[:137]}..."
-
-
-def _build_text_body(payload: SendPostcardRequest) -> str:
+def _build_text_body(payload: PostcardEmailPayload) -> str:
     return "\n".join(
         [
-            f"Postcard for {payload.recipient}",
-            f"Template: {payload.template_id} ({payload.template_name})",
-            f"Created at: {payload.created_at.isoformat()}",
-            f"Front background: {payload.front_background}",
-            f"To: {payload.recipient_handle}",
-            f"From: {payload.sender}",
+            "This is for you",
             "",
-            "Message:",
-            payload.message,
+            "정적 카드와 동적 카드 이미지를 확인해주세요.",
         ]
     )
 
 
-def _build_html_body(payload: SendPostcardRequest) -> str:
-    message_html = html.escape(payload.message).replace("\n", "<br>")
-    sender_html = html.escape(payload.sender)
-    recipient_html = html.escape(payload.recipient_handle)
-    date_str = payload.created_at.strftime("%Y / %m / %d")
-
-    return f"""
+def _build_html_body() -> str:
+    return """
 <!doctype html>
 <html>
-  <body style="margin:0;padding:0;background:#0f172a;font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif;color:#0f172a;">
-    <table role="presentation" style="width:100%;border-collapse:collapse;padding:40px 0;">
+  <body style="margin:0;padding:24px;background:#f3f4f6;font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif;color:#111827;">
+    <table role="presentation" style="width:100%;max-width:680px;margin:0 auto;background:#ffffff;border-radius:20px;padding:32px;border:1px solid #e5e7eb;">
       <tr>
-        <td align="center">
-          <div style="width:100%;max-width:640px;margin:0 auto;">
-            
-            <!-- FRONT CARD -->
-            <div style="background-color:{payload.front_background}; border-radius:4px; padding:20px; margin-bottom:40px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">
-                <img src="{payload.front_gif_url}" alt="Front" style="width:100%; height:auto; display:block; border-radius:2px; margin:0 auto;" />
+        <td style="text-align:center;">
+          <h2 style="margin:0 0 24px 0;font-size:26px;">This is for you</h2>
+
+          <div style="display:flex;flex-direction:column;gap:28px;">
+            <div>
+              <p style="margin:0 0 8px 0;font-weight:600;">Front Card</p>
+              <img src="cid:front-card-static" alt="Front card" style="width:100%;border-radius:16px;display:block;"/>
             </div>
-
-            <!-- BACK CARD (POSTCARD STYLE) -->
-            <div style="background-color:#ffffff; border-radius:4px; padding:40px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">
-                <!-- Header -->
-                <div style="text-align:center; margin-bottom:30px;">
-                    <h2 style="margin:0; font-family:'Times New Roman', serif; font-size:24px; letter-spacing:4px; color:#333; font-weight:normal;">POSTCARD</h2>
-                </div>
-
-                <table role="presentation" style="width:100%; border-collapse:collapse;">
-                    <tr>
-                        <!-- LEFT COLUMN (Message) -->
-                        <td style="width:50%; vertical-align:top; padding-right:24px; border-right:1px solid #e2e8f0;">
-                            <p style="margin:0 0 24px 0; font-size:18px; font-weight:bold; font-family:'Times New Roman', serif; font-style:italic; color:#1e293b;">
-                                To. <span style="font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif; font-style:normal;">{recipient_html}</span>
-                            </p>
-                            <div style="font-size:15px; line-height:1.8; color:#475569; white-space:pre-wrap; font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif;">{message_html}</div>
-                        </td>
-
-                        <!-- RIGHT COLUMN (Meta) -->
-                        <td style="width:50%; vertical-align:top; padding-left:24px;">
-                            <!-- Date -->
-                            <div style="text-align:right; margin-bottom:20px; font-size:13px; color:#94a3b8; font-family:'Times New Roman', serif;">
-                                DATE <span style="border-bottom:1px solid #cbd5e1; padding:0 8px; margin-left:4px; font-family:monospace;">{date_str}</span>
-                            </div>
-
-                            <!-- Stamp Area -->
-                            <div style="text-align:right; margin-bottom:60px;">
-                                <div style="display:inline-block; width:90px; height:100px; border:1px dashed #cbd5e1; padding:4px; background:#f8fafc;">
-                                    <img src="{payload.back_gif_url}" alt="Stamp" style="width:100%; height:100%; object-fit:contain;" />
-                                </div>
-                            </div>
-
-                            <!-- Sender -->
-                            <div style="text-align:right;">
-                                <p style="margin:0; font-size:18px; font-weight:bold; font-family:'Times New Roman', serif; font-style:italic; color:#1e293b;">
-                                    From. <span style="font-family:'Pretendard','Apple SD Gothic Neo',Arial,sans-serif; font-style:normal;">{sender_html}</span>
-                                </p>
-                            </div>
-                        </td>
-                    </tr>
-                </table>
+            <div>
+              <p style="margin:0 0 8px 0;font-weight:600;">Back Card</p>
+              <img src="cid:back-card-static" alt="Back card" style="width:100%;border-radius:16px;display:block;"/>
             </div>
-
-            <p style="margin-top:30px; text-align:center; color:#64748b; font-size:12px;">Sent via Th!s !s for u</p>
+            <div>
+              <p style="margin:0 0 8px 0;font-weight:600;">Front Animation</p>
+              <img src="cid:front-card-gif" alt="Front animation" style="width:100%;border-radius:16px;display:block;"/>
+            </div>
+            <div>
+              <p style="margin:0 0 8px 0;font-weight:600;">Back Animation</p>
+              <img src="cid:back-card-gif" alt="Back animation" style="width:100%;border-radius:16px;display:block;"/>
+            </div>
           </div>
         </td>
       </tr>
@@ -453,7 +242,39 @@ def _env_bool(key: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on", "y"}
 
 
-def send_email(to_email: str, subject: str, html_body: str, text_body: str = None):
+def _build_message(payload: PostcardEmailPayload) -> MIMEMultipart:
+    subject = "This is for you"
+    text_body = _build_text_body(payload)
+    html_body = _build_html_body()
+
+    root = MIMEMultipart("related")
+    root["Subject"] = subject
+    root["From"] = os.getenv("MAIL_FROM") or os.getenv("MAIL_USERNAME") or ""
+    root["To"] = str(payload.recipient)
+
+    alternative = MIMEMultipart("alternative")
+    alternative.attach(MIMEText(text_body, "plain", "utf-8"))
+    alternative.attach(MIMEText(html_body, "html", "utf-8"))
+    root.attach(alternative)
+
+    attachments = [
+        ("front-card-static", "front-card.png", "image/png", payload.front_card_png),
+        ("back-card-static", "back-card.png", "image/png", payload.back_card_png),
+        ("front-card-gif", "front-card.gif", "image/gif", payload.front_gif),
+        ("back-card-gif", "back-card.gif", "image/gif", payload.back_gif),
+    ]
+
+    for cid, filename, content_type, data in attachments:
+        subtype = content_type.split("/", 1)[1]
+        mime_image = MIMEImage(data, _subtype=subtype)
+        mime_image.add_header("Content-ID", f"<{cid}>")
+        mime_image.add_header("Content-Disposition", "inline", filename=filename)
+        root.attach(mime_image)
+
+    return root
+
+
+def send_postcard_email(payload: PostcardEmailPayload) -> None:
     smtp_server = os.getenv("MAIL_SERVER")
     smtp_port = int(os.getenv("MAIL_PORT", "587"))
     smtp_user = os.getenv("MAIL_USERNAME")
@@ -463,17 +284,12 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: str = Non
     use_starttls = _env_bool("MAIL_STARTTLS", True)
     use_ssl_tls = _env_bool("MAIL_SSL_TLS", False)
 
-    if not all([smtp_server, smtp_port, smtp_user, smtp_pass]):
+    if not all([smtp_server, smtp_port, smtp_user, smtp_pass, from_email]):
         raise HTTPException(status_code=500, detail="메일 환경변수가 올바르게 설정되지 않았습니다.")
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
-    msg["To"] = to_email
-
-    if text_body:
-        msg.attach(MIMEText(text_body, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
+    message = _build_message(payload)
+    message.replace_header("From", f"{from_name} <{from_email}>" if from_name else from_email)
+    message.replace_header("To", str(payload.recipient))
 
     try:
         if use_ssl_tls:
@@ -485,24 +301,7 @@ def send_email(to_email: str, subject: str, html_body: str, text_body: str = Non
             if use_starttls and not use_ssl_tls:
                 server.starttls(context=ssl.create_default_context())
             server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, [to_email], msg.as_string())
+            server.sendmail(from_email, [str(payload.recipient)], message.as_string())
     except Exception as exc:
-        print(f"SMTP 전송 실패: {exc}")
-        raise HTTPException(status_code=502, detail=f"SMTP 전송 실패: {exc}") from exc
-
-    return True
-
-
-def send_postcard_email(payload: SendPostcardRequest):
-    subject = f"[Postcard] {payload.template_name}"
-    text_body = _build_text_body(payload)
-    html_body = _build_html_body(payload)
-
-    try:
-        send_email(str(payload.recipient), subject, html_body, text_body)
-        logger.info("Postcard mail sent to %s", payload.recipient)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("메일 전송 실패: %s", exc)
+        logger.exception("SMTP 전송 실패: %s", exc)
         raise HTTPException(status_code=502, detail="메일 전송에 실패했습니다.") from exc
