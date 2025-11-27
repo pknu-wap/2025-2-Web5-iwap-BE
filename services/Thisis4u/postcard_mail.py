@@ -209,12 +209,28 @@ def _build_html_body() -> str:
         <td style="text-align:center;">
           <h2 style="margin:0 0 24px 0;font-size:26px;">This is for you</h2>
 
-          <div style="display:flex;flex-direction:column;gap:28px;">
-            <img src="cid:front-card-static" alt="Front card" style="width:100%;border-radius:16px;display:block;"/>
-            <img src="cid:back-card-static" alt="Back card" style="width:100%;border-radius:16px;display:block;"/>
-            <img src="cid:front-card-gif" alt="Front animation" style="width:100%;border-radius:16px;display:block;"/>
-            <img src="cid:back-card-gif" alt="Back animation" style="width:100%;border-radius:16px;display:block;"/>
-          </div>
+          <table role="presentation" style="width:100%;border-collapse:collapse;">
+            <tr>
+              <td style="padding-bottom:28px;">
+                <img src="cid:front-card-static" alt="Front card" style="width:100%;border-radius:16px;display:block;"/>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-bottom:28px;">
+                <img src="cid:back-card-static" alt="Back card" style="width:100%;border-radius:16px;display:block;"/>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding-bottom:28px;">
+                <img src="cid:front-card-gif" alt="Front animation" style="width:100%;border-radius:16px;display:block;"/>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <img src="cid:back-card-gif" alt="Back animation" style="width:100%;border-radius:16px;display:block;"/>
+              </td>
+            </tr>
+          </table>
         </td>
       </tr>
     </table>
