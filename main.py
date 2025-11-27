@@ -371,6 +371,17 @@ def _ensure_video_upload(upload: UploadFile, label: str) -> None:
     raise HTTPException(status_code=400, detail=f"{label}은(는) 비디오 파일이어야 합니다.")
 
 
+def _detect_video_format(upload: UploadFile) -> str:
+    if upload.content_type:
+        lowered = upload.content_type.lower()
+        if "webm" in lowered:
+            return "webm"
+    filename = (upload.filename or "").lower()
+    if filename.endswith(".webm"):
+        return "webm"
+    return "mp4"
+
+
 @app.post("/api/postcards/send")
 async def send_postcard(
     templateId: str = Form(...),
@@ -385,6 +396,8 @@ async def send_postcard(
 ):
     _ensure_video_upload(frontMp4, "frontMp4")
     _ensure_video_upload(backMp4, "backMp4")
+    front_format = _detect_video_format(frontMp4)
+    back_format = _detect_video_format(backMp4)
 
     created_raw = createdAt.strip()
     if created_raw.endswith("Z"):
@@ -409,6 +422,8 @@ async def send_postcard(
         message=message,
         front_video=front_bytes,
         back_video=back_bytes,
+        front_format=front_format,
+        back_format=back_format,
     )
 
     payload = await run_in_threadpool(builder)
