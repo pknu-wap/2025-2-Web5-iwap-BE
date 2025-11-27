@@ -61,8 +61,8 @@ def _safe_background(value: str, fallback: str = "#111827") -> str:
     return cleaned if CSS_COLOR_PATTERN.match(cleaned) else fallback
 
 
-def _video_bytes_to_s3_url(video_bytes: bytes) -> str:
-    gif_bytes = _convert_video_to_gif(video_bytes)
+def _video_bytes_to_s3_url(video_bytes: bytes, video_format: str) -> str:
+    gif_bytes = _convert_video_to_gif(video_bytes, video_format)
     return _upload_gif_to_s3(gif_bytes)
 
 
@@ -147,7 +147,7 @@ def _upload_gif_to_s3(gif_bytes: bytes) -> str:
     return f"https://{bucket}.s3.amazonaws.com/{key}"
 
 
-def _convert_video_to_gif(video_bytes: bytes) -> bytes:
+def _convert_video_to_gif(video_bytes: bytes, video_format: str) -> bytes:
     if not video_bytes:
         raise HTTPException(status_code=400, detail="비디오 파일이 비어있습니다.")
     if len(video_bytes) > MAX_VIDEO_BYTES:
@@ -156,9 +156,11 @@ def _convert_video_to_gif(video_bytes: bytes) -> bytes:
 
     work_dir = Path(tempfile.mkdtemp(prefix="postcard-"))
     best_bytes: Optional[bytes] = None
+    normalized_format = video_format.lower()
+    suffix = ".webm" if normalized_format == "webm" else ".mp4"
 
     try:
-        input_path = work_dir / "clip.mp4"
+        input_path = work_dir / f"clip{suffix}"
         output_path = work_dir / "clip.gif"
         input_path.write_bytes(video_bytes)
 
@@ -269,9 +271,11 @@ class SendPostcardRequest(BaseModel):
         message: str,
         front_video: bytes,
         back_video: bytes,
+        front_format: str,
+        back_format: str,
     ) -> "SendPostcardRequest":
-        front_url = _video_bytes_to_s3_url(front_video)
-        back_url = _video_bytes_to_s3_url(back_video)
+        front_url = _video_bytes_to_s3_url(front_video, front_format)
+        back_url = _video_bytes_to_s3_url(back_video, back_format)
         return cls(
             templateId=template_id,
             templateName=template_name,
